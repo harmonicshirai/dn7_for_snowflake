@@ -450,27 +450,27 @@ if %error% equ 0 if not %only_install% == 1 (
 :      In/Out - |In -
 :defSetting
   : Setting
-  set file_status=%cd%\__STATUS__
-  set file_temp=%cd%\__TEMP__
-  set file_ver=%cd%\VERSION
+  set file_status=.\__STATUS__
+  set file_temp=.\__TEMP__
+  set file_ver=.\VERSION
   :: Product Judge File dn or oss
-  set file_prod=%cd%\requirements\prod.txt
-  set file_oss_prod=%cd%\requirements\oss_prod.txt
-  set path_R=%cd%\..\R-Portable
-  set ca_cert=%cd%\..\cacert.pem
-  set path_python=%cd%\..\python_embedded_39
+  set file_prod=.\requirements\prod.txt
+  set file_oss_prod=.\requirements\oss_prod.txt
+  set path_R=.\..\R-Portable
+  set ca_cert=.\..\cacert.pem
+  set path_python=.\..\python_embedded_39
   :: Override PYTHONPATH with empty for cmd session only
   set PYTHONPATH=
-  set env_path=%cd%\..\env
-  set sqlite_dll=%cd%\init\sqlite3.dll
-  set path_getpip=%cd%\..\get-pip.py
-  set path_oracle=%cd%\..\Oracle-Portable
-  set path_python_zip=%cd%\..\python_embedded_39.zip
-  set path_oracle_zip=%cd%\..\Oracle-Portable.zip
+  set env_path=.\..\env
+  set sqlite_dll=.\init\sqlite3.dll
+  set path_getpip=.\..\get-pip.py
+  set path_oracle=.\..\Oracle-Portable
+  set path_python_zip=.\..\python_embedded_39.zip
+  set path_oracle_zip=.\..\Oracle-Portable.zip
   set lib_path=%path_oracle%\instantclient_21_3;%env_path%\Scripts;%env_path%\Lib;%SystemRoot%\System32;%SystemRoot%\System32\WindowsPowerShell\v1.0\;
   :: Startup Error log file
-  set stage_status=%cd%\stage_status.log
-  set stage_start_time=%cd%\stage_start_time.log
+  set stage_status=.\stage_status.log
+  set stage_start_time=.\stage_start_time.log
   set is_venv_activated=0
   set start_file=%cd%\start_ap.exe
   :: Disk space required to run AP
@@ -478,7 +478,7 @@ if %error% equ 0 if not %only_install% == 1 (
 
   : links
   set ca_cert_url="https://curl.se/ca/cacert-2023-08-22.pem"
-  set python39_url="https://www.python.org/ftp/python/3.9.0/python-3.9.0-embed-amd64.zip"
+  set python39_url="https://www.python.org/ftp/python/3.9.13/python-3.9.13-embed-amd64.zip"
   set get_pip_url="https://bootstrap.pypa.io/get-pip.py"
   set oracle_instance_url="https://download.oracle.com/otn_software/nt/instantclient/213000/instantclient-basic-windows.x64-21.3.0.0.0.zip"
 
@@ -655,6 +655,8 @@ setlocal
   echo   - update_R: %update_R% >> %filename%
   echo   - enable_file_log: %enable_file_log% >> %filename%
   echo   - enable_ga_tracking: %enable_ga_tracking% >> %filename%
+  echo   - enable_dump_trace_log: %enable_dump_trace_log% >> %filename%
+  echo   - disable_config_from_external: %disable_config_from_external% >> %filename%
 
 endlocal
 exit /b

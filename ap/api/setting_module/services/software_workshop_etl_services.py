@@ -1,496 +1,761 @@
 from __future__ import annotations
 
-import pandas as pd
+import dataclasses
+from functools import cached_property
+from typing import Optional
+
 import sqlalchemy as sa
+from sqlalchemy.sql import sqltypes
 
-from ap.common.constants import TABLE_PROCESS_NAME, UNDER_SCORE, BaseEnum, MasterDBType
-from ap.common.logger import log_execution_time
+from ap.common.common_utils import BoundType, TimeRange
+from ap.common.constants import UNDER_SCORE, MasterDBType
 from ap.common.memoize import CustomCache
-from ap.common.pydn.dblib.db_proxy import DbProxy
-from ap.setting_module.models import CfgDataSource, CfgProcess
+from ap.common.pydn.dblib.db_proxy_read_only import ReadOnlyDbProxy
+from ap.setting_module.models import CfgDataSource
 
-factory_table = sa.Table(
-    'fctries',
-    sa.MetaData(),
-    sa.Column('fctry_id', sa.TEXT),
-    sa.Column('fctry_name', sa.TEXT),
-)
-
-line_groups_table = sa.Table(
-    'line_grps',
-    sa.MetaData(),
-    sa.Column('fctry_id', sa.TEXT),
-    sa.Column('line_grp_id', sa.TEXT),
-)
-
-lines_table = sa.Table(
-    'lines',
-    sa.MetaData(),
-    sa.Column('line_id', sa.TEXT),
-    sa.Column('line_name', sa.TEXT),
-    sa.Column('line_grp_id', sa.TEXT),
-)
-
-equips_table = sa.Table(
-    'equips',
-    sa.MetaData(),
-    sa.Column('equip_id', sa.TEXT),
-    sa.Column('line_id', sa.TEXT),
-)
-
-child_equips_table = sa.Table(
-    'child_equips',
-    sa.MetaData(),
-    sa.Column('child_equip_id', sa.TEXT),
-    sa.Column('child_equip_name', sa.TEXT),
-    sa.Column('equip_id', sa.TEXT),
-)
-
-child_equip_meas_items_table = sa.Table(
-    'child_equip_meas_items',
-    sa.MetaData(),
-    sa.Column('child_equip_id', sa.TEXT),
-    sa.Column('meas_item_code', sa.TEXT),
-    sa.Column('meas_item_name', sa.TEXT),
-)
-
-quality_measurements_table = sa.Table(
-    'quality_measurements',
-    sa.MetaData(),
-    sa.Column('quality_measurement_id', sa.BIGINT),
-    sa.Column('child_equip_id', sa.TEXT),
-    sa.Column('event_time', sa.TIMESTAMP),
-    sa.Column('created_at', sa.TIMESTAMP),
-    sa.Column('part_no', sa.TEXT),
-    sa.Column('lot_no', sa.TEXT),
-    sa.Column('tray_no', sa.TEXT),
-    sa.Column('serial_no', sa.TEXT),
-)
-
-measurements_table = sa.Table(
-    'measurements',
-    sa.MetaData(),
-    sa.Column('quality_measurement_id', sa.BIGINT),
-    sa.Column('code', sa.TEXT),
-    sa.Column('unit', sa.TEXT),
-    sa.Column('value', sa.REAL),
-)
-
-string_measurements_table = sa.Table(
-    'string_measurements',
-    sa.MetaData(),
-    sa.Column('quality_measurement_id', sa.BIGINT),
-    sa.Column('code', sa.TEXT),
-    sa.Column('unit', sa.TEXT),
-    sa.Column('value', sa.TEXT),
-)
-
-quality_traceabilities_table = sa.Table(
-    'quality_traceabilities',
-    sa.MetaData(),
-    sa.Column('quality_traceability_id', sa.BIGINT),
-    sa.Column('child_equip_id', sa.TEXT),
-    sa.Column('event_time', sa.TIMESTAMP),
-    sa.Column('created_at', sa.TIMESTAMP),
-    sa.Column('part_no', sa.TEXT),
-    sa.Column('lot_no', sa.TEXT),
-    sa.Column('tray_no', sa.TEXT),
-    sa.Column('serial_no', sa.TEXT),
-)
-
-components_table = sa.Table(
-    'components',
-    sa.MetaData(),
-    sa.Column('component_id', sa.BIGINT),  # for order record
-    sa.Column('quality_traceability_id', sa.BIGINT),
-    sa.Column('part_no', sa.TEXT),
-    sa.Column('lot_no', sa.TEXT),
-    sa.Column('tray_no', sa.TEXT),
-    sa.Column('serial_no', sa.TEXT),
-)
+FACTORY_LINE_GROUP_LABEL = 'factory_line_grp'
 
 
-class BaseNameColumns(BaseEnum):
-    PREFIX = 'Sub'
-    PART = 'Part'
-    LOT = 'Lot'
-    TRAY = 'Tray'
-    SERIAL = 'Serial'
+@dataclasses.dataclass
+class SoftwareWorkshopDef:
+    # snowflake software workshop has measurement and string measurement column exist on quality measurement table
+    snowflake: bool
+    measurements_and_components_columns_on_quality_tables: bool
 
+    # table name
+    factories: str
+    line_groups: str
+    lines: str
+    equips: str
+    child_equips: str
+    child_equip_meas_items: str
+    quality_measurements: str
+    quality_traceabilities: str
+    table_name: str
 
-class SubColumns(BaseEnum):
-    SUB_PART_NO = f'sub_{components_table.c.part_no.name}'
-    SUB_LOT_NO = f'sub_{components_table.c.lot_no.name}'
-    SUB_TRAY_NO = f'sub_{components_table.c.tray_no.name}'
-    SUB_SERIAL_NO = f'sub_{components_table.c.serial_no.name}'
+    # this can be table or column
+    measurements: str
+    string_measurements: str
+    components: str
 
-    SUB_PART_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.PART.value}'
-    SUB_LOT_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.LOT.value}'
-    SUB_TRAY_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.TRAY.value}'
-    SUB_SERIAL_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.SERIAL.value}'
+    # column names
+    factory_id: str
+    factory_name: str
+    line_group_id: str
+    line_group_name: str
+    line_id: str
+    line_name: str
+    equip_id: str
+    child_equip_id: str
+    child_equip_name: str
+    meas_item_code: str
+    meas_item_name: str
+    quality_measurement_id: str
+    quality_traceability_id: str
+    component_id: str
+    event_time: str
+    created_at: str
+    part_no: str
+    lot_no: str
+    tray_no: str
+    serial_no: str
+    code: str
+    unit: str
+    value: str
 
+    # history sub columns prefix
+    sub_part_no: str
+    sub_lot_no: str
+    sub_tray_no: str
+    sub_serial_no: str
 
-def get_processes_stmt(limit: int | None = None):
-    join_master = (
-        sa.join(
-            left=child_equips_table,
-            right=equips_table,
-            onclause=equips_table.c.equip_id == child_equips_table.c.equip_id,
+    @cached_property
+    def factories_table(self) -> sa.Table:
+        return sa.Table(
+            self.factories,
+            sa.MetaData(),
+            sa.Column(self.factory_id, sa.TEXT),
+            sa.Column(self.factory_name, sa.TEXT),
         )
-        .join(
-            right=lines_table,
-            onclause=lines_table.c.line_id == equips_table.c.line_id,
+
+    @cached_property
+    def line_groups_table(self) -> sa.Table:
+        return sa.Table(
+            self.line_groups,
+            sa.MetaData(),
+            sa.Column(self.factory_id, sa.TEXT),
+            sa.Column(self.line_group_id, sa.TEXT),
+            sa.Column(self.line_group_name, sa.TEXT),
         )
-        .join(
-            right=line_groups_table,
-            onclause=line_groups_table.c.line_grp_id == lines_table.c.line_grp_id,
+
+    @cached_property
+    def lines_table(self) -> sa.Table:
+        return sa.Table(
+            self.lines,
+            sa.MetaData(),
+            sa.Column(self.line_id, sa.TEXT),
+            sa.Column(self.line_name, sa.TEXT),
+            sa.Column(self.line_group_id, sa.TEXT),
         )
-        .join(
-            right=factory_table,
-            onclause=factory_table.c.fctry_id == line_groups_table.c.fctry_id,
+
+    @cached_property
+    def equips_table(self) -> sa.Table:
+        return sa.Table(
+            self.equips,
+            sa.MetaData(),
+            sa.Column(self.equip_id, sa.TEXT),
+            sa.Column(self.line_id, sa.TEXT),
         )
-    )
 
-    stmt = (
-        sa.select(
-            sa.func.concat(
-                factory_table.c.fctry_name,
-                UNDER_SCORE,
-                lines_table.c.line_name,
-                UNDER_SCORE,
-                child_equips_table.c.child_equip_name,
-            ).label(TABLE_PROCESS_NAME),
-            child_equips_table.c.child_equip_id,
+    @cached_property
+    def child_equips_table(self) -> sa.Table:
+        return sa.Table(
+            self.child_equips,
+            sa.MetaData(),
+            sa.Column(self.child_equip_id, sa.TEXT),
+            sa.Column(self.child_equip_name, sa.TEXT),
+            sa.Column(self.equip_id, sa.TEXT),
         )
-        .select_from(join_master)
-        .order_by(child_equips_table.c.child_equip_id)
-        .distinct(child_equips_table.c.child_equip_id)
-    )
 
-    if limit is not None:
-        stmt = stmt.limit(limit)
-
-    return stmt
-
-
-def get_code_name_mapping_stmt(process_factid: str):
-    stmt = (
-        sa.select(
-            child_equip_meas_items_table.c.meas_item_code,
-            child_equip_meas_items_table.c.meas_item_name,
+    @cached_property
+    def child_equip_meas_items_table(self) -> sa.Table:
+        return sa.Table(
+            self.child_equip_meas_items,
+            sa.MetaData(),
+            sa.Column(self.child_equip_id, sa.TEXT),
+            sa.Column(self.meas_item_code, sa.TEXT),
+            sa.Column(self.meas_item_name, sa.TEXT),
         )
-        .where(child_equip_meas_items_table.c.child_equip_id == process_factid)
-        .order_by(child_equip_meas_items_table.c.meas_item_code)
-    )
 
-    return stmt
+    @cached_property
+    def quality_measurements_table(self) -> sa.Table:
+        columns = [
+            sa.Column(self.quality_measurement_id, sa.BIGINT),
+            sa.Column(self.child_equip_id, sa.TEXT),
+            sa.Column(self.event_time, sa.TIMESTAMP),
+            sa.Column(self.created_at, sa.TIMESTAMP),
+            sa.Column(self.part_no, sa.TEXT),
+            sa.Column(self.lot_no, sa.TEXT),
+            sa.Column(self.tray_no, sa.TEXT),
+            sa.Column(self.serial_no, sa.TEXT),
+        ]
+        if self.measurements_and_components_columns_on_quality_tables:
+            columns.append(sa.Column(self.measurements, sa.TEXT))
+            columns.append(sa.Column(self.string_measurements, sa.TEXT))
 
+        return sa.Table(self.quality_measurements, sa.MetaData(), *columns)
 
-def get_master_data_stmt(
-    process_factid: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    cfg_process: CfgProcess = None,
-    limit: int | None = 2000,
-    is_measurement: bool = True,
-):
-    target_table = quality_measurements_table if is_measurement else quality_traceabilities_table
-    join_master = (
-        sa.join(
-            left=target_table,
-            right=child_equips_table,
-            onclause=child_equips_table.c.child_equip_id == target_table.c.child_equip_id,
+    @cached_property
+    def measurements_table(self) -> Optional[sa.Table]:
+        if self.measurements_and_components_columns_on_quality_tables:
+            # no such table
+            return None
+        return sa.Table(
+            self.measurements,
+            sa.MetaData(),
+            sa.Column(self.quality_measurement_id, sa.BIGINT),
+            sa.Column(self.code, sa.TEXT),
+            sa.Column(self.unit, sa.TEXT),
+            sa.Column(self.value, sa.REAL),
         )
-        .join(
-            right=equips_table,
-            onclause=equips_table.c.equip_id == child_equips_table.c.equip_id,
+
+    @cached_property
+    def string_measurements_table(self) -> Optional[sa.Table]:
+        if self.measurements_and_components_columns_on_quality_tables:
+            # no such table
+            return None
+
+        return sa.Table(
+            self.string_measurements,
+            sa.MetaData(),
+            sa.Column(self.quality_measurement_id, sa.BIGINT),
+            sa.Column(self.code, sa.TEXT),
+            sa.Column(self.unit, sa.TEXT),
+            sa.Column(self.value, sa.TEXT),
         )
-        .join(
-            right=lines_table,
-            onclause=lines_table.c.line_id == equips_table.c.line_id,
+
+    @cached_property
+    def quality_traceabilities_table(self) -> sa.Table:
+        columns = [
+            sa.Column(self.quality_traceability_id, sa.BIGINT),
+            sa.Column(self.child_equip_id, sa.TEXT),
+            sa.Column(self.event_time, sa.TIMESTAMP),
+            sa.Column(self.created_at, sa.TIMESTAMP),
+            sa.Column(self.part_no, sa.TEXT),
+            sa.Column(self.lot_no, sa.TEXT),
+            sa.Column(self.tray_no, sa.TEXT),
+            sa.Column(self.serial_no, sa.TEXT),
+        ]
+        if self.measurements_and_components_columns_on_quality_tables:
+            columns.append(sa.Column(self.components, sa.TEXT))
+
+        return sa.Table(self.quality_traceabilities, sa.MetaData(), *columns)
+
+    @cached_property
+    def components_table(self) -> Optional[sa.Table]:
+        if self.measurements_and_components_columns_on_quality_tables:
+            # no such table
+            return None
+        return sa.Table(
+            self.components,
+            sa.MetaData(),
+            sa.Column(self.component_id, sa.BIGINT),  # for order record
+            sa.Column(self.quality_traceability_id, sa.BIGINT),
+            sa.Column(self.part_no, sa.TEXT),
+            sa.Column(self.lot_no, sa.TEXT),
+            sa.Column(self.tray_no, sa.TEXT),
+            sa.Column(self.serial_no, sa.TEXT),
         )
-        .join(
-            right=line_groups_table,
-            onclause=line_groups_table.c.line_grp_id == lines_table.c.line_grp_id,
+
+    def get_master_query(self, child_equip_ids: list[str] = None) -> sa.Select:
+        query = sa.select(
+            self.child_equips_table.c[self.child_equip_id],
+            self.child_equips_table.c[self.child_equip_name],
+            self.factories_table.c[self.factory_id],
+            self.factories_table.c[self.factory_name],
+            self.lines_table.c[self.line_id],
+            self.lines_table.c[self.line_name],
+            self.line_groups_table.c[self.line_group_name],
+        ).select_from(
+            sa.join(
+                left=self.child_equips_table,
+                right=self.equips_table,
+                onclause=self.equips_table.c[self.equip_id] == self.child_equips_table.c[self.equip_id],
+            )
+            .join(
+                right=self.lines_table,
+                onclause=self.lines_table.c[self.line_id] == self.equips_table.c[self.line_id],
+            )
+            .join(
+                right=self.line_groups_table,
+                onclause=self.line_groups_table.c[self.line_group_id] == self.lines_table.c[self.line_group_id],
+            )
+            .join(
+                right=self.factories_table,
+                onclause=self.factories_table.c[self.factory_id] == self.line_groups_table.c[self.factory_id],
+            )
         )
-        .join(
-            right=factory_table,
-            onclause=factory_table.c.fctry_id == line_groups_table.c.fctry_id,
+
+        if child_equip_ids:
+            query = query.where(self.child_equips_table.c[self.child_equip_id].in_(child_equip_ids))
+
+        return query
+
+    def get_processes_query(self) -> sa.Select:
+        cte = self.get_master_query().cte('master_table')
+        return (
+            sa.select(
+                sa.func.concat(
+                    cte.c[self.factory_name],
+                    UNDER_SCORE,
+                    cte.c[self.line_name],
+                    UNDER_SCORE,
+                    cte.c[self.child_equip_name],
+                ).label(self.table_name),
+                cte.c[self.child_equip_id],
+            )
+            .order_by(cte.c[self.child_equip_id])
+            .distinct(cte.c[self.child_equip_id])
         )
-    )
 
-    conditions = []
-    if process_factid is not None:
-        conditions.append(target_table.c.child_equip_id == process_factid)
-    if cfg_process:
-        auto_increment_col_name = cfg_process.get_auto_increment_col_else_get_date()
-        auto_increment_col = sa.Column(auto_increment_col_name, sa.TIMESTAMP)
-    if start_date is not None:
-        conditions.append(auto_increment_col > start_date)
-    if end_date is not None:
-        conditions.append(auto_increment_col <= end_date)
+    def get_processes_by_line_groups_query(self) -> sa.Select:
+        cte = self.get_master_query().cte('master_table')
+        return (
+            sa.select(
+                sa.func.concat(
+                    cte.c[self.factory_name],
+                    UNDER_SCORE,
+                    cte.c[self.line_group_name],
+                ).label('FACTORY_LINE_GRP'),
+                sa.func.concat(cte.c[self.line_name], '(', cte.c[self.line_id], ')').label('LINE'),
+                sa.func.concat(cte.c[self.child_equip_name], '(', cte.c[self.child_equip_id], ')').label('CHILD_EQUIP'),
+                sa.func.concat(
+                    cte.c[self.factory_name],
+                    UNDER_SCORE,
+                    cte.c[self.line_name],
+                    UNDER_SCORE,
+                    cte.c[self.child_equip_name],
+                ).label(self.table_name),
+                cte.c[self.child_equip_id],
+            )
+            .order_by(cte.c[self.child_equip_id])
+            .distinct(cte.c[self.child_equip_id])
+        )
 
-    stmt = sa.select(
-        target_table.c.quality_measurement_id if is_measurement else target_table.c.quality_traceability_id,
-        target_table.c.event_time,
-        target_table.c.created_at,
-        target_table.c.part_no,
-        target_table.c.lot_no,
-        target_table.c.tray_no,
-        target_table.c.serial_no,
-        factory_table.c.fctry_id,
-        factory_table.c.fctry_name,
-        lines_table.c.line_id,
-        lines_table.c.line_name,
-        child_equips_table.c.child_equip_id,
-        child_equips_table.c.child_equip_name,
-    ).select_from(join_master)
+    def get_measurement_min_max_time_query(self, datetime_key: str, child_equip_id: Optional[str] = None) -> sa.Select:
+        query = sa.select(
+            sa.func.min(self.quality_measurements_table.c[datetime_key]),
+            sa.func.max(self.quality_measurements_table.c[datetime_key]),
+        )
+        if child_equip_id:
+            query = query.where(self.quality_measurements_table.c[self.child_equip_id] == child_equip_id)
+        return query
 
-    if conditions:
-        stmt = stmt.where(sa.and_(*conditions))
+    def get_history_min_max_time_query(self, datetime_key: str, child_equip_id: Optional[str] = None) -> sa.Select:
+        query = sa.select(
+            sa.func.min(self.quality_traceabilities_table.c[datetime_key]),
+            sa.func.max(self.quality_traceabilities_table.c[datetime_key]),
+        )
+        if child_equip_id:
+            query = query.where(self.quality_traceabilities_table.c[self.child_equip_id] == child_equip_id)
+        return query
 
-    if limit is not None:
-        stmt = stmt.limit(limit)
+    def get_measurement_min_max_time_query_group_by_child_equip_id(
+        self,
+        datetime_keys: list[str],
+        child_equip_ids: list[str],
+    ) -> sa.Select:
+        if len(datetime_keys) != len(child_equip_ids):
+            raise ValueError(
+                f'datetime_keys ({len(datetime_keys)} and child_equip_ids ({len(child_equip_ids)}) len mismatch'
+            )
 
-    return stmt
+        columns = [self.quality_measurements_table.c[self.child_equip_id]]
+        for datetime_key in set(datetime_keys):
+            columns.append(sa.func.min(self.quality_measurements_table.c[datetime_key]).label(f'min_{datetime_key}'))
+            columns.append(sa.func.max(self.quality_measurements_table.c[datetime_key]).label(f'max_{datetime_key}'))
 
+        query = (
+            sa.select(*columns)
+            .where(self.quality_measurements_table.c[self.child_equip_id].in_(child_equip_ids))
+            .group_by(self.quality_measurements_table.c[self.child_equip_id])
+        )
 
-def get_transaction_data_stmt(
-    process_factid: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    cfg_process: CfgProcess = None,
-    limit: int | None = None,
-    master_type: MasterDBType = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT,
-):
-    if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
-        return get_measurement_transaction_data_stmt(
+        return query
+
+    def get_history_min_max_time_query_group_by_child_equip_id(
+        self,
+        datetime_keys: list[str],
+        child_equip_ids: list[str],
+    ) -> sa.Select:
+        if len(datetime_keys) != len(child_equip_ids):
+            raise ValueError(
+                f'datetime_keys ({len(datetime_keys)} and child_equip_ids ({len(child_equip_ids)}) len mismatch'
+            )
+
+        columns = [self.quality_traceabilities_table.c[self.child_equip_id]]
+        for datetime_key in set(datetime_keys):
+            columns.append(sa.func.min(self.quality_traceabilities_table.c[datetime_key]).label(f'min_{datetime_key}'))
+            columns.append(sa.func.max(self.quality_traceabilities_table.c[datetime_key]).label(f'max_{datetime_key}'))
+
+        query = (
+            sa.select(*columns)
+            .where(self.quality_traceabilities_table.c[self.child_equip_id].in_(child_equip_ids))
+            .group_by(self.quality_traceabilities_table.c[self.child_equip_id])
+        )
+
+        return query
+
+    def get_measurement_data_query(
+        self,
+        process_factid: str,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = None,
+    ) -> sa.Select:
+        columns = [
+            self.quality_measurements_table.c[self.child_equip_id],
+            self.quality_measurements_table.c[self.serial_no],
+            self.quality_measurements_table.c[self.part_no],
+            self.quality_measurements_table.c[self.lot_no],
+            self.quality_measurements_table.c[self.tray_no],
+            self.quality_measurements_table.c[self.event_time],
+            self.quality_measurements_table.c[self.created_at],
+        ]
+        if self.measurements_and_components_columns_on_quality_tables:
+            columns.append(self.quality_measurements_table.c[self.measurements])
+            columns.append(self.quality_measurements_table.c[self.string_measurements])
+
+        conditions = [self.quality_measurements_table.c[self.child_equip_id] == process_factid]
+        query = sa.select(*columns)
+
+        if datetime_key and time_range is not None:
+            # need to order by date time key because caller relies on the order
+            query = query.order_by(self.quality_measurements_table.c[datetime_key])
+            if time_range.min.kind is BoundType.INCLUDED:
+                conditions.append(self.quality_measurements_table.c[datetime_key] >= time_range.min.value)
+            elif time_range.min.kind is BoundType.EXCLUDED:
+                conditions.append(self.quality_measurements_table.c[datetime_key] > time_range.min.value)
+            if time_range.max.kind is BoundType.INCLUDED:
+                conditions.append(self.quality_measurements_table.c[datetime_key] <= time_range.max.value)
+            elif time_range.max.kind is BoundType.EXCLUDED:
+                conditions.append(self.quality_measurements_table.c[datetime_key] < time_range.max.value)
+
+        query = query.where(*conditions)
+
+        if limit:
+            query = query.limit(limit)
+
+        return query
+
+    def get_history_data_query(
+        self,
+        process_factid: str,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = None,
+    ) -> sa.Select:
+        columns = [
+            self.quality_traceabilities_table.c[self.child_equip_id],
+            self.quality_traceabilities_table.c[self.serial_no],
+            self.quality_traceabilities_table.c[self.part_no],
+            self.quality_traceabilities_table.c[self.lot_no],
+            self.quality_traceabilities_table.c[self.tray_no],
+            self.quality_traceabilities_table.c[self.event_time],
+            self.quality_traceabilities_table.c[self.created_at],
+        ]
+        if self.measurements_and_components_columns_on_quality_tables:
+            columns.append(self.quality_traceabilities_table.c[self.components])
+
+        conditions = [self.quality_traceabilities_table.c[self.child_equip_id] == process_factid]
+        query = sa.select(*columns)
+
+        if datetime_key and time_range is not None:
+            # need to order by date time key because caller relies on the order
+            query = query.order_by(self.quality_traceabilities_table.c[datetime_key])
+            if time_range.min.kind is BoundType.INCLUDED:
+                conditions.append(self.quality_traceabilities_table.c[datetime_key] >= time_range.min.value)
+            elif time_range.min.kind is BoundType.EXCLUDED:
+                conditions.append(self.quality_traceabilities_table.c[datetime_key] > time_range.min.value)
+            if time_range.max.kind is BoundType.INCLUDED:
+                conditions.append(self.quality_traceabilities_table.c[datetime_key] <= time_range.max.value)
+            elif time_range.max.kind is BoundType.EXCLUDED:
+                conditions.append(self.quality_traceabilities_table.c[datetime_key] < time_range.max.value)
+
+        query = query.where(*conditions)
+
+        if limit:
+            query = query.limit(limit)
+
+        return query
+
+    def get_code_name_mapping_query(self, child_equip_ids: list[str]):
+        return (
+            sa.select(
+                self.child_equip_meas_items_table.c[self.child_equip_id],
+                self.child_equip_meas_items_table.c[self.meas_item_code],
+                self.child_equip_meas_items_table.c[self.meas_item_name],
+            )
+            .where(self.child_equip_meas_items_table.c[self.child_equip_id].in_(child_equip_ids))
+            .order_by(self.child_equip_meas_items_table.c[self.meas_item_code])
+        )
+
+    def get_quality_and_master_data_query(
+        self,
+        process_factid: Optional[str] = None,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = 2000,
+        is_measurement: bool = True,
+    ):
+        target_table = self.quality_measurements_table if is_measurement else self.quality_traceabilities_table
+        join_master = (
+            sa.join(
+                left=target_table,
+                right=self.child_equips_table,
+                onclause=self.child_equips_table.c[self.child_equip_id] == target_table.c[self.child_equip_id],
+            )
+            .join(
+                right=self.equips_table,
+                onclause=self.equips_table.c[self.equip_id] == self.child_equips_table.c[self.equip_id],
+            )
+            .join(
+                right=self.lines_table,
+                onclause=self.lines_table.c[self.line_id] == self.equips_table.c[self.line_id],
+            )
+            .join(
+                right=self.line_groups_table,
+                onclause=self.line_groups_table.c[self.line_group_id] == self.lines_table.c[self.line_group_id],
+            )
+            .join(
+                right=self.factories_table,
+                onclause=self.factories_table.c[self.factory_id] == self.line_groups_table.c[self.factory_id],
+            )
+        )
+
+        conditions = []
+        if process_factid is not None:
+            conditions.append(target_table.c[self.child_equip_id] == process_factid)
+        if datetime_key and time_range is not None:
+            if time_range.min.kind is BoundType.INCLUDED:
+                conditions.append(target_table.c[datetime_key] >= time_range.min.value)
+            elif time_range.min.kind is BoundType.EXCLUDED:
+                conditions.append(target_table.c[datetime_key] > time_range.min.value)
+            if time_range.max.kind is BoundType.INCLUDED:
+                conditions.append(target_table.c[datetime_key] <= time_range.max.value)
+            elif time_range.max.kind is BoundType.EXCLUDED:
+                conditions.append(target_table.c[datetime_key] < time_range.max.value)
+
+        query = sa.select(
+            target_table.c[self.quality_measurement_id]
+            if is_measurement
+            else target_table.c[self.quality_traceability_id],
+            target_table.c[self.event_time],
+            target_table.c[self.created_at],
+            target_table.c[self.part_no],
+            target_table.c[self.lot_no],
+            target_table.c[self.tray_no],
+            target_table.c[self.serial_no],
+            self.factories_table.c[self.factory_id],
+            self.factories_table.c[self.factory_name],
+            self.lines_table.c[self.line_id],
+            self.lines_table.c[self.line_name],
+            self.child_equips_table.c[self.child_equip_id],
+            self.child_equips_table.c[self.child_equip_name],
+        ).select_from(join_master)
+
+        if conditions:
+            query = query.where(*conditions)
+
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query
+
+    def get_transaction_data_query(
+        self,
+        process_factid: Optional[str] = None,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = None,
+        master_type: MasterDBType = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT,
+    ):
+        """
+        - Normal software workshop: get joined master data and transaction data
+        - Snowflake software workshop: get transaction data (no master data)
+        We can refactor both of them (after we implement the transform pipeline for normal software workshop)
+        """
+        if self.snowflake:
+            # sw measurement
+            if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
+                return self.get_measurement_data_query(
+                    process_factid=process_factid,
+                    datetime_key=datetime_key,
+                    time_range=time_range,
+                    limit=limit,
+                )
+            elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
+                return self.get_history_data_query(
+                    process_factid=process_factid,
+                    datetime_key=datetime_key,
+                    time_range=time_range,
+                    limit=limit,
+                )
+            else:
+                raise NotImplementedError(f'Cannot handle master type {master_type} for snowflake data source')
+        # measurement
+        if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
+            return self.get_measurement_data_with_master_query(
+                process_factid=process_factid,
+                datetime_key=datetime_key,
+                time_range=time_range,
+                limit=limit,
+            )
+        # history
+        return self.get_history_data_with_master_query(
             process_factid=process_factid,
-            start_date=start_date,
-            end_date=end_date,
-            cfg_process=cfg_process,
+            datetime_key=datetime_key,
+            time_range=time_range,
             limit=limit,
         )
-    elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
-        return get_history_transaction_data_stmt(
-            process_factid=process_factid,
-            start_date=start_date,
-            end_date=end_date,
-            cfg_process=cfg_process,
-            limit=limit,
+
+    def get_measurement_data_with_master_query(
+        self,
+        process_factid: Optional[str] = None,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = None,
+    ):
+        if self.measurements_and_components_columns_on_quality_tables:
+            raise ValueError(
+                'This query can only works for dataset that measurements and components columns are on separated tables'
+            )
+
+        cte = self.get_quality_and_master_data_query(
+            process_factid,
+            datetime_key,
+            time_range,
+            limit,
+        ).cte('master_data')
+
+        measurements_query = sa.select(
+            cte,
+            self.measurements_table.c[self.code],
+            self.measurements_table.c[self.unit],
+            # need to cast data to text in order to union
+            sa.cast(self.measurements_table.c[self.value], sqltypes.TEXT).label(
+                self.measurements_table.c[self.value].name
+            ),
+        ).select_from(
+            sa.join(
+                left=cte,
+                right=self.measurements_table,
+                onclause=cte.c[self.quality_measurement_id] == self.measurements_table.c[self.quality_measurement_id],
+            ),
         )
 
+        string_measurements_query = sa.select(
+            cte,
+            self.string_measurements_table.c[self.code],
+            self.string_measurements_table.c[self.unit],
+            self.string_measurements_table.c[self.value],
+        ).select_from(
+            sa.join(
+                left=cte,
+                right=self.string_measurements_table,
+                onclause=cte.c[self.quality_measurement_id]
+                == self.string_measurements_table.c[self.quality_measurement_id],
+            ),
+        )
 
-def get_measurement_transaction_data_stmt(
-    process_factid: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    cfg_process: CfgProcess = None,
-    limit: int | None = None,
-):
-    cte = get_master_data_stmt(process_factid, start_date, end_date, cfg_process, limit).cte('master_data')
+        query = measurements_query.union_all(string_measurements_query)
+        if datetime_key is not None:
+            query = query.order_by(query.c[datetime_key])
 
-    measurements_stmt = sa.select(
-        cte,
-        measurements_table.c.code,
-        measurements_table.c.unit,
-        # need to cast data to text in order to union
-        sa.cast(measurements_table.c.value, sa.sql.sqltypes.TEXT).label(measurements_table.c.value.name),
-    ).select_from(
-        sa.join(
-            left=cte,
-            right=measurements_table,
-            onclause=cte.c.quality_measurement_id == measurements_table.c.quality_measurement_id,
-        ),
-    )
+        return query
 
-    string_measurements_stmt = sa.select(
-        cte,
-        string_measurements_table.c.code,
-        string_measurements_table.c.unit,
-        string_measurements_table.c.value,
-    ).select_from(
-        sa.join(
-            left=cte,
-            right=string_measurements_table,
-            onclause=cte.c.quality_measurement_id == string_measurements_table.c.quality_measurement_id,
-        ),
-    )
+    def get_history_data_with_master_query(
+        self,
+        process_factid: Optional[str] = None,
+        datetime_key: Optional[str] = None,
+        time_range: Optional[TimeRange] = None,
+        limit: Optional[int] = None,
+    ):
+        if self.measurements_and_components_columns_on_quality_tables:
+            raise ValueError(
+                'This query can only works for dataset that measurements and components columns are on separated tables'
+            )
 
-    stmt = measurements_stmt.union_all(string_measurements_stmt)
-    stmt = stmt.order_by(stmt.c.event_time)
+        cte = self.get_quality_and_master_data_query(
+            process_factid,
+            datetime_key,
+            time_range=time_range,
+            limit=limit,
+            is_measurement=False,
+        ).cte('master_data')
 
-    return stmt
+        query = sa.select(
+            cte,
+            self.components_table.c[self.component_id],  # for order records
+            self.components_table.c[self.part_no].label(self.sub_part_no),
+            self.components_table.c[self.lot_no].label(self.sub_lot_no),
+            self.components_table.c[self.tray_no].label(self.sub_tray_no),
+            self.components_table.c[self.serial_no].label(self.sub_serial_no),
+        ).select_from(
+            sa.join(
+                left=cte,
+                right=self.components_table,
+                onclause=cte.c[self.quality_traceability_id] == self.components_table.c[self.quality_traceability_id],
+            ),
+        )
 
+        # Need to change to `cte` and `components_table`. If we used the old `query`,
+        # sqlalchemy will create `anon`. Not sure why ...
+        order_bys = []
+        if datetime_key is not None:
+            order_bys.append(cte.c[datetime_key])
+        order_bys.append(self.components_table.c[self.component_id])
 
-def get_history_transaction_data_stmt(
-    process_factid: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    cfg_process: CfgProcess = None,
-    limit: int | None = None,
-):
-    cte = get_master_data_stmt(
-        process_factid,
-        start_date,
-        end_date,
-        cfg_process=cfg_process,
-        limit=limit,
-        is_measurement=False,
-    ).cte('master_data')
+        if order_bys:
+            query = query.order_by(*order_bys)
 
-    stmt = sa.select(
-        cte,
-        components_table.c.component_id,  # for order records
-        components_table.c.part_no.label(SubColumns.SUB_PART_NO.value),
-        components_table.c.lot_no.label(SubColumns.SUB_LOT_NO.value),
-        components_table.c.tray_no.label(SubColumns.SUB_TRAY_NO.value),
-        components_table.c.serial_no.label(SubColumns.SUB_SERIAL_NO.value),
-    ).select_from(
-        sa.join(
-            left=cte,
-            right=components_table,
-            onclause=cte.c.quality_traceability_id == components_table.c.quality_traceability_id,
-        ),
-    )
+        return query
 
-    # Need to change to `cte` and `components_table`. If we used the old `stmt`,
-    # sqlalchemy will create `anon`. Not sure why ...
-    stmt = stmt.order_by(cte.c.event_time, components_table.c.component_id)
-
-    return stmt
+    @CustomCache.memoize()
+    # TODO: separate to 2 classes. local software workshop and snowflake software workshop
+    def get_code_name_mapping(self, data_source_id: int, process_factid: str) -> dict[str, str]:
+        data_source = CfgDataSource.query.get(data_source_id)
+        with ReadOnlyDbProxy(data_source) as db_instance:
+            sql = self.get_code_name_mapping_query(child_equip_ids=[process_factid])
+            _, rows = db_instance.run_sql(sql)
+        return {r[self.meas_item_code]: r[self.meas_item_name] for r in rows}
 
 
-@CustomCache.memoize()
-def get_code_name_mapping(data_source_id: int, process_factid: str) -> dict[str, str]:
-    data_source = CfgDataSource.query.get(data_source_id)
-    with DbProxy(data_source) as db_instance:
-        stmt = get_code_name_mapping_stmt(process_factid)
-        sql, params = db_instance.gen_sql_and_params(stmt)
-        cols, rows = db_instance.run_sql(sql, row_is_dict=False, params=params)
-    return dict(rows)
+# TODO: subclass instead of declare like this
+POSTGRES_SOFTWARE_WORKSHOP_DEF = SoftwareWorkshopDef(
+    snowflake=False,
+    measurements_and_components_columns_on_quality_tables=False,
+    factories='fctries',
+    line_groups='line_grps',
+    lines='lines',
+    equips='equips',
+    child_equips='child_equips',
+    child_equip_meas_items='child_equip_meas_items',
+    quality_measurements='quality_measurements',
+    quality_traceabilities='quality_traceabilities',
+    measurements='measurements',
+    string_measurements='string_measurements',
+    components='components',
+    factory_id='fctry_id',
+    factory_name='fctry_name',
+    line_group_id='line_grp_id',
+    line_group_name='line_grp_name',
+    line_id='line_id',
+    line_name='line_name',
+    equip_id='equip_id',
+    child_equip_id='child_equip_id',
+    child_equip_name='child_equip_name',
+    meas_item_code='meas_item_code',
+    meas_item_name='meas_item_name',
+    quality_measurement_id='quality_measurement_id',
+    quality_traceability_id='quality_traceability_id',
+    component_id='component_id',
+    event_time='event_time',
+    created_at='created_at',
+    part_no='part_no',
+    lot_no='lot_no',
+    tray_no='tray_no',
+    serial_no='serial_no',
+    code='code',
+    unit='unit',
+    value='value',
+    sub_part_no='sub_part_no',
+    sub_lot_no='sub_lot_no',
+    sub_tray_no='sub_tray_no',
+    sub_serial_no='sub_serial_no',
+    table_name='table_name',
+)
 
-
-def transform_measurement_transaction_data_to_horizontal(software_workshop_vertical_df: pd.DataFrame) -> pd.DataFrame:
-    # all master columns in dataframe
-    master_columns = [
-        factory_table.c.fctry_id.name,
-        factory_table.c.fctry_name.name,
-        lines_table.c.line_id.name,
-        lines_table.c.line_name.name,
-        child_equips_table.c.child_equip_id.name,
-        child_equips_table.c.child_equip_name.name,
-    ]
-
-    # columns for getting unique records
-    index_columns = [
-        child_equips_table.c.child_equip_id.name,
-        quality_measurements_table.c.event_time.name,
-        quality_measurements_table.c.serial_no.name,
-        quality_measurements_table.c.part_no.name,
-    ]
-
-    # horizontal columns in vertical dataframe
-    horizontal_columns = [
-        quality_measurements_table.c.lot_no.name,
-        quality_measurements_table.c.tray_no.name,
-        quality_measurements_table.c.created_at.name,
-    ]
-
-    # all required columns from those columns above. We use this hack to preserve order
-    required_columns = list(dict.fromkeys([*master_columns, *index_columns, *horizontal_columns]))
-
-    # columns used for pivoting
-    pivot_column = measurements_table.c.code.name
-    pivot_value = measurements_table.c.value.name
-
-    df_pivot = (
-        # only select required columns, ignore unneeded ones
-        software_workshop_vertical_df[[*index_columns, pivot_column, pivot_value]]
-        # drop duplicated columns, to make sure pivot can work properly
-        .drop_duplicates(subset=[*index_columns, pivot_column], keep='last')
-        .pivot(index=index_columns, columns=pivot_column, values=pivot_value)
-        .reset_index()
-    )
-
-    # merge to get master data
-    df_with_master = software_workshop_vertical_df[required_columns].drop_duplicates(subset=index_columns, keep='last')
-    df_horizontal = df_pivot.merge(right=df_with_master, on=index_columns)
-
-    # sort vertical columns for better output, we don't want our data being shown as col_03 col_01 col_02
-    sorted_vertical_columns = sorted(c for c in df_horizontal.columns if c not in required_columns)
-    df_horizontal = df_horizontal[[*required_columns, *sorted_vertical_columns]]
-
-    return df_horizontal
-
-
-def transform_history_transaction_data_to_horizontal(software_workshop_vertical_df: pd.DataFrame) -> pd.DataFrame:
-    # all master columns in dataframe
-    horizontal_columns = [
-        factory_table.c.fctry_id.name,
-        factory_table.c.fctry_name.name,
-        lines_table.c.line_id.name,
-        lines_table.c.line_name.name,
-        child_equips_table.c.child_equip_id.name,
-        child_equips_table.c.child_equip_name.name,
-        quality_traceabilities_table.c.event_time.name,
-        quality_traceabilities_table.c.serial_no.name,
-        quality_traceabilities_table.c.part_no.name,
-        quality_traceabilities_table.c.quality_traceability_id.name,
-    ]
-
-    # sub columns in vertical dataframe
-    sub_column_names = [
-        SubColumns.SUB_PART_NO.value,
-        SubColumns.SUB_LOT_NO.value,
-        SubColumns.SUB_TRAY_NO.value,
-        SubColumns.SUB_SERIAL_NO.value,
-    ]
-
-    dfs = [pd.DataFrame(columns=horizontal_columns)]
-    for idx, df_grouped in software_workshop_vertical_df.groupby(horizontal_columns):
-        df_horizontal_columns = df_grouped[horizontal_columns].drop_duplicates()
-        for order_no, (row_idx, row) in enumerate(df_grouped.iterrows(), 1):
-            new_sub_column_names = [
-                SubColumns.SUB_PART_NO_PATTERN.value.format(order_no),
-                SubColumns.SUB_LOT_NO_PATTERN.value.format(order_no),
-                SubColumns.SUB_TRAY_NO_PATTERN.value.format(order_no),
-                SubColumns.SUB_SERIAL_NO_PATTERN.value.format(order_no),
-            ]
-            for sub_column_name, new_sub_column_name in zip(sub_column_names, new_sub_column_names):
-                df_horizontal_columns[new_sub_column_name] = row[sub_column_name]
-        dfs.append(df_horizontal_columns)
-
-    df = pd.concat(dfs, ignore_index=True)
-    # drop duplicate in case row & column are not aligned each order
-    df = (
-        df.drop(columns=[quality_traceabilities_table.c.quality_traceability_id.name])
-        .drop_duplicates(keep='last')
-        .fillna(pd.NA)
-    )
-    new_sub_column_names = list(set(df.columns.tolist()) - set(horizontal_columns))
-    df[new_sub_column_names] = df[new_sub_column_names].astype(pd.StringDtype())
-
-    return df
-
-
-@log_execution_time()
-def transform_df_for_software_workshop(
-    df: pd.DataFrame,
-    data_source_id: int,
-    process_factid: str,
-    master_type: MasterDBType = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT,
-    rename_columns: dict[str, str] = None,
-) -> pd.DataFrame:
-    if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
-        df = df.sort_values(by='code', ascending=False)
-        code_name_mapping = get_code_name_mapping(data_source_id, process_factid)
-        df[measurements_table.c.code.name] = df[measurements_table.c.code.name].map(code_name_mapping)
-        df = transform_measurement_transaction_data_to_horizontal(df)
-    elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
-        df = transform_history_transaction_data_to_horizontal(df)
-
-    if rename_columns:
-        df = df.rename(columns=rename_columns)
-
-    return df
+SNOWFLAKE_SOFTWARE_WORKSHOP_DEF = SoftwareWorkshopDef(
+    snowflake=True,
+    measurements_and_components_columns_on_quality_tables=True,
+    factories='FCTRIES',
+    line_groups='LINE_GRPS',
+    lines='LINES',
+    equips='EQUIPS',
+    child_equips='CHILD_EQUIPS',
+    child_equip_meas_items='CHILD_EQUIP_MEAS_ITEMS',
+    quality_measurements='QUALITY_MEASUREMENTS',
+    quality_traceabilities='QUALITY_TRACEABILITIES',
+    measurements='MEASUREMENTS',
+    string_measurements='STRING_MEASUREMENTS',
+    components='COMPONENTS',
+    factory_id='FCTRY_ID',
+    factory_name='FCTRY_NAME',
+    line_group_id='LINE_GRP_ID',
+    line_group_name='LINE_GRP_NAME',
+    line_id='LINE_ID',
+    line_name='LINE_NAME',
+    equip_id='EQUIP_ID',
+    child_equip_id='CHILD_EQUIP_ID',
+    child_equip_name='CHILD_EQUIP_NAME',
+    meas_item_code='MEAS_ITEM_CODE',
+    meas_item_name='MEAS_ITEM_NAME',
+    quality_measurement_id='QUALITY_MEASUREMENT_ID',
+    quality_traceability_id='QUALITY_TRACEABILITY_ID',
+    component_id='COMPONENT_ID',
+    event_time='EVENT_TIME',
+    created_at='CREATED_AT',
+    part_no='PART_NO',
+    lot_no='LOT_NO',
+    tray_no='TRAY_NO',
+    serial_no='SERIAL_NO',
+    code='CODE',
+    unit='UNIT',
+    value='VALUE',
+    sub_part_no='SUB_PART_NO',
+    sub_lot_no='SUB_LOT_NO',
+    sub_tray_no='SUB_TRAY_NO',
+    sub_serial_no='SUB_SERIAL_NO',
+    table_name='TABLE_NAME',  # snowflake returns uppercase column names by default
+)

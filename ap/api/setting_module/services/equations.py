@@ -129,10 +129,7 @@ def get_all_normal_columns_for_functions(
 
 
 def is_all_new_functions(funcs):
-    if any(func[ID] is not None and func[ID] >= 1 for func in funcs):
-        return False
-
-    return True
+    return not any(func[ID] is not None and func[ID] >= 1 for func in funcs)
 
 
 def remove_all_function_columns(session, proc_id):

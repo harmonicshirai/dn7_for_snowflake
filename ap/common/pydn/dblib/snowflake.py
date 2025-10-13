@@ -1,0 +1,371 @@
+import enum
+import json
+import logging
+import re
+from typing import Any, Optional, Union
+
+import snowflake.connector
+import sqlalchemy as sa
+from snowflake.connector import SnowflakeConnection
+from snowflake.sqlalchemy import snowdialect
+
+from ap.common.common_utils import convert_sa_sql_to_sa_str, handle_read_only, strip_all_quote
+from ap.common.logger import log_execution_time
+
+logger = logging.getLogger(__name__)
+
+
+class SnowflakeAuthenticationType(enum.Enum):
+    KEY_PAIR = 'keypair'
+    ACCESS_TOKEN = 'access_token'
+
+
+class Snowflake:
+    def __init__(
+        self,
+        account: str,
+        user: str,
+        dbname: str,
+        warehouse: str,
+        role: str,
+        authentication_type: str,
+        access_token: str,
+        private_key_file: str,
+        private_key_file_pwd: Optional[str] = None,
+        port=443,
+        schema='PUBLIC',
+    ):
+        self.account = account
+        self.user = user
+        self.port = port
+        self.dbname = dbname
+        self.schema = schema
+        self.connection: Union[SnowflakeConnection, None] = None
+        self.read_only = True
+        self.role = role
+        self.warehouse = warehouse
+        self.is_connected = False
+
+        # authentication
+        self.authentication_type = SnowflakeAuthenticationType(authentication_type)
+        self.private_key_file = private_key_file
+        self.private_key_file_pwd = private_key_file_pwd
+        self.access_token = access_token
+
+    def dump(self):
+        logger.info(
+            f"""\
+        ===== DUMP RESULT =====
+DB Type: Snowflake
+self.account: {self.account}
+self.port: {self.port}
+self.dbname: {self.dbname}
+self.username: {self.user}
+self.schema: {self.schema}
+self.is_connected: {self.is_connected}
+======================='
+""",
+        )
+
+    def connect(self) -> Optional[SnowflakeConnection]:
+        try:
+            if self.authentication_type == SnowflakeAuthenticationType.ACCESS_TOKEN:
+                self.connection = snowflake.connector.connect(
+                    account=self.account,
+                    user=self.user,
+                    database=self.dbname,
+                    schema=self.schema,
+                    port=self.port,
+                    role=self.role,
+                    warehouse=self.warehouse,
+                    password=self.access_token,
+                )
+            else:
+                self.connection = snowflake.connector.connect(
+                    account=self.account,
+                    user=self.user,
+                    database=self.dbname,
+                    schema=self.schema,
+                    port=self.port,
+                    role=self.role,
+                    warehouse=self.warehouse,
+                    private_key_file=self.private_key_file,
+                    private_key_file_pwd=self.private_key_file_pwd,
+                )
+
+            self.is_connected = True
+            # https://github.com/snowflakedb/snowflake-connector-python?tab=readme-ov-file#disable-telemetry
+            self.connection.telemetry_enabled = False
+            return self.connection
+        except Exception as e:
+            logger.exception(e)
+            return None
+
+    def disconnect(self):
+        if not self._check_connection():
+            return False
+        self.connection.close()
+        self.is_connected = False
+
+    @handle_read_only(False)
+    def create_table(self, table_name, valtypes):
+        if not self._check_connection():
+            return False
+
+        table_name = table_name.strip('"')
+        sql = 'create table {0:s}('.format(table_name)
+        for idx, val in enumerate(valtypes):
+            if idx > 0:
+                sql += ','
+
+            sql += val['name'] + ' ' + val['type']
+        sql += ')'
+        logger.debug(sql)
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        cur.close()
+        self.connection.commit()
+        logger.debug(f'{table_name} + created!')
+
+    # 作成済みのテーブルを配列として返す
+    def list_tables(self):
+        if not self._check_connection():
+            return False
+
+        sql = f'SHOW TABLES IN SCHEMA {self.dbname}.{self.schema};'
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        results = []
+        for row in cur.fetchall():
+            results.append(row[1])
+        return results
+
+    def list_tables_and_views(self):
+        if not self._check_connection():
+            return False
+        # Only list tables of default schema (default schema name can be got by "SCHEMA_NAME()")
+        sql = f'SHOW TABLES IN SCHEMA {self.dbname}.{self.schema};'
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        results = []
+        rows = cur.fetchall()
+        for row in rows:
+            results.append(row[1])
+        cur.close()
+        return results
+
+    @staticmethod
+    def _clean_sql_statement(sql_statement):
+        sql_statement = sql_statement.replace('`', '"')
+        return re.sub(
+            r'(\.[a-zA-Z_][a-zA-Z0-9_]*)',
+            lambda m: f'."{m.group(0)[1:]}"',
+            sql_statement,
+        )  # change "table_name".column_name -> "table_name"."column_name"
+
+    @handle_read_only(False)
+    def drop_table(self, table_name):
+        if not self._check_connection():
+            return False
+
+        sql = 'drop table if exists ' + table_name
+        sql = self._clean_sql_statement(sql)
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        cur.close()
+        self.connection.commit()
+        logger.debug(f'{table_name}  dropped!')
+
+    # テーブルのカラムのタイプを辞書の配列として返す
+    # columns:
+    #  name => カラム名,
+    #  type => カラムタイプ
+    def list_table_columns(self, tblname):
+        if not self._check_connection():
+            return False
+        sql = 'SHOW COLUMNS IN TABLE ' + tblname
+        sql = self._clean_sql_statement(sql)
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        rows = cur.fetchall()
+        results = []
+        for row in rows:
+            data_type = json.loads(row[3])
+            results.append({'name': row[2], 'type': data_type.get('type')})
+        return results
+
+    def get_data_type_by_colname(self, tbl, col_name):
+        col_name = strip_all_quote(col_name)
+        cols = self.list_table_columns(tbl)
+        data_type = [col['type'] for col in cols if col['name'] == col_name]
+        return data_type[0] if data_type else None
+
+    # list_table_columnsのうちcolumn nameだけ必要な場合
+    def list_table_colnames(self, tblname):
+        if not self._check_connection():
+            return False
+        columns = self.list_table_columns(tblname)
+        col_names = []
+        for column in columns:
+            col_names.append(column['name'])
+        return col_names
+
+    @handle_read_only(False)
+    def insert_table_records(self, tblname, names, values, add_comma_to_value=True):
+        if not self._check_connection():
+            return False
+
+        sql = 'insert into {0:s}'.format(tblname)
+
+        # Generate column names field
+        sql += '('
+        for idx, name in enumerate(names):
+            if idx > 0:
+                sql += ','
+            sql += name
+        sql += ') '
+
+        # Generate values field
+        sql += 'values '
+        for idx1, value in enumerate(values):
+            if idx1 > 0:
+                sql += ','
+            sql += '('
+            for idx2, name in enumerate(names):
+                if idx2 > 0:
+                    sql += ','
+
+                if value[name] in ('', None):
+                    sql += 'Null'
+                elif add_comma_to_value:
+                    sql += "'" + str(value[name]) + "'"
+                else:
+                    sql += str(value[name])
+
+            sql += ')'
+
+        sql = self._clean_sql_statement(sql)
+        cur = self.connection.cursor()
+        cur.execute(sql)
+        cur.close()
+        self.connection.commit()
+        logger.debug(f'Dummy data was inserted to {tblname}!')
+
+    # SQLをそのまま実行。
+    # cols, rows = db1.run_sql("select * from tbl01")
+    # という形で呼び出す
+    @log_execution_time(prefix='SNOWFLAKE')
+    @convert_sa_sql_to_sa_str
+    @handle_read_only()
+    def run_sql(self, sql: str, row_is_dict=True, params=None):
+        if not self._check_connection():
+            return False, None
+
+        cur = self.connection.cursor()
+
+        sql = self._clean_sql_statement(sql)
+        logger.debug(sql)
+        logger.debug(params)
+        cur.execute(sql, params)
+
+        # cursor.descriptionはcolumnの配列
+        cols = [x.name for x in cur.description]
+        # columnsは取得したカラム名、rowはcolumnsをKeyとして持つ辞書型の配列
+        # rowは取得したカラムに対応する値が順番にrow[0], row[1], ...として入っている
+        # それをdictでまとめてrowsに取得
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()] if row_is_dict else cur.fetchall()
+
+        cur.close()
+        return cols, rows
+
+    @log_execution_time(prefix='SNOWFLAKE')
+    @convert_sa_sql_to_sa_str
+    @handle_read_only()
+    def fetch_many(self, sql, size=10_000, params=None):
+        if not self._check_connection():
+            return False
+
+        cur = self.connection.cursor()
+        sql = self._clean_sql_statement(sql)
+
+        logger.debug(sql)
+        logger.debug(params)
+
+        cur.execute(sql, params)
+        cols = [x.name for x in cur.description]
+        yield cols
+        while True:
+            rows = cur.fetchmany(size)
+            if not rows:
+                break
+
+            yield rows
+
+        cur.close()
+
+    # 現時点ではSQLをそのまま実行するだけ
+    def select_table(self, sql):
+        return self.run_sql(sql)
+
+    def get_timezone(self):
+        try:
+            _, rows = self.run_sql("SHOW PARAMETERS LIKE 'TIMEZONE' IN SESSION;")
+            tz_offset = str(rows[0]['value'])
+            return tz_offset
+
+        except Exception as e:
+            logger.exception(e)
+
+        return None
+
+    @log_execution_time(prefix='SNOWFLAKE')
+    @convert_sa_sql_to_sa_str
+    @handle_read_only()
+    def execute_sql(self, sql):
+        """For executing any query requires commit action
+        :param sql: SQL to be executed
+        :return: Execution result
+        """
+        if not self._check_connection():
+            return False
+
+        sql = self._clean_sql_statement(sql)
+        cur = self.connection.cursor()
+        logger.debug(sql)
+        res = cur.execute(sql)
+        cur.close()
+        self.connection.commit()
+
+        return res
+
+    # private functions
+    def _check_connection(self):
+        if self.is_connected:
+            return True
+        # 接続していないなら
+        logger.info('Connection is not Initialized. Please run connect() to connect to DB')
+        return False
+
+    def is_timezone_hold_column(self, table_name: str, col_name: str) -> bool:
+        """There are 3 types of timestamp as below:
+
+        - TIMESTAMP_LTZ : timestamp with local time zone (stores UTC time)
+
+        - TIMESTAMP_NTZ : timestamp without time zone
+
+        - TIMESTAMP_TZ  : timestamp with time zone (stores UTC time together with an associated time zone offset.)
+
+        Reference: https://docs.snowflake.com/sql-reference/data-types-datetime#timestamp-ltz-timestamp-ntz-timestamp-tz
+
+        :param str table_name: Table name
+        :param str col_name: column name
+        :return: True: hold timezone, False: not hold timezone
+        """
+
+        data_type = self.get_data_type_by_colname(table_name, col_name)
+        return bool(data_type.upper().endswith('_TZ'))
+
+    @staticmethod
+    def gen_sql_and_params(stmt: Union[sa.Select, sa.TextClause]) -> tuple[str, dict[str, Any]]:
+        compiled_stmt = stmt.compile(dialect=snowdialect.dialect(), compile_kwargs={'render_postcompile': True})
+        return compiled_stmt.string, compiled_stmt.params

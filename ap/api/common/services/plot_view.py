@@ -200,8 +200,7 @@ def gen_stats_table(
     for proc_id in proc_ids:
         proc_cfg = graph_param.dic_proc_cfgs[proc_id]
         serial_col_cfgs = proc_cfg.get_serials(column_name_only=False)
-        if len(serial_col_cfgs) >= max_num_serial:
-            max_num_serial = len(serial_col_cfgs)
+        max_num_serial = max(len(serial_col_cfgs), max_num_serial)
 
     for proc_order, proc_id in enumerate(proc_ids):
         proc_cfg = graph_param.dic_proc_cfgs[proc_id]

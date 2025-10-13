@@ -90,6 +90,20 @@ const isHideNoneDataPoint = (procId, colId, isRemoveOutlier) => {
     return isHideNonePoint;
 };
 
+const copyButtonHtml = (tableId = 'summary-table-info') => {
+    return ` <button
+                class="btn position-absolute"
+                id="dp-info-table-copy${tableId}"
+                data-clipboard-target="#${tableId}"
+                title="Copy to Clipboard"
+                onclick="copyDataPointInfo(this);"
+                data-copy-from="${tableId}"
+                style="top: -4px; right: -11px; z-index: 2000;"
+            >
+                <i class="fa fa-copy" aria-hidden="true"></i>
+            </button>`;
+};
+
 const buildSummaryResultsHTML = (
     summaryOption,
     tableIndex,
@@ -98,6 +112,8 @@ const buildSummaryResultsHTML = (
     stepChartSummary = null,
 ) => {
     const [nTotalHTML, noLinkedHTML] = genTotalAndNonLinkedHTML(summaryOption, generalInfo);
+
+    const infoTableId = 'summary-table' + create_UUID();
 
     if (beforeRankValues) {
         let stepChartStatHTML = '';
@@ -138,13 +154,15 @@ const buildSummaryResultsHTML = (
                 ${stepChartStatUnLinkedHTML}`;
         }
         return `
-        <table class="hist-summary-detail result count" style="margin-top: 10px;">
+        ${copyButtonHtml(infoTableId)}
+         <div id="${infoTableId}" style="margin-top: 10px;">
+        <table class="hist-summary-detail result count">
             <tbody>
                 ${stepChartNTotalHTML}
                 ${stepChartStatHTML}
             </tbody>
         </table>
-        <table class="hist-summary-detail result basic-statistics" style="margin-top: 10px;">
+        <table class="hist-summary-detail result basic-statistics">
             <tbody>
                 <tr>
                     <td><span class="item-name hint-text" title="${i18nCommon.hoverN}">N</span></td>
@@ -154,13 +172,16 @@ const buildSummaryResultsHTML = (
                 </tr>
             </tbody>
         </table>
-        <table class="hist-summary-detail result non-parametric" style="margin-top: 10px;">
+        <table class="hist-summary-detail result non-parametric">
         </table>
+        </div>
         `;
     }
 
     return `
-    <table class="hist-summary-detail result count" style="margin-top: 10px;">
+       ${copyButtonHtml(infoTableId)}
+    <div id="${infoTableId}" style="margin-top: 10px;">
+    <table class="hist-summary-detail result count">
         <tbody>
             <tr>
                 <td><span class="hint-text" title="${i18nCommon.hoverNTotal}">N<sub>total</sub></span></td>
@@ -217,7 +238,7 @@ const buildSummaryResultsHTML = (
             ${noLinkedHTML}
         </tbody>
     </table>
-    <table class="hist-summary-detail result basic-statistics" style="margin-top: 10px;">
+    <table class="hist-summary-detail result basic-statistics">
         <tbody>
             <tr>
                 <td><span class="item-name hint-text" title="${i18nCommon.hoverN}">N</span></td>
@@ -269,7 +290,7 @@ const buildSummaryResultsHTML = (
             </tr>
         </tbody>
     </table>
-    <table class="hist-summary-detail result non-parametric" style="margin-top: 10px;">
+    <table class="hist-summary-detail result non-parametric">
         <tbody>
             <tr>
                 <td><span class="item-name hint-text" title="${i18nCommon.hoverMedian}">${i18nCommon.median || '中央値'}</span></td>
@@ -320,5 +341,6 @@ const buildSummaryResultsHTML = (
                 </td>
             </tr>
         </tbody>
-    </table>`;
+    </table>
+    </div>`;
 };

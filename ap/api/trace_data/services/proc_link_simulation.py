@@ -17,9 +17,9 @@ def sim_gen_global_id(edges: List[CfgTrace]):
     """
     traces = CfgTrace.get_all()
     dic_proc_data_count = {}
-    trans = [TransactionData(proc.id) for proc in CfgProcess.get_all_ids()]
+    trans = [TransactionData(proc_id) for proc_id in CfgProcess.get_all_ids()]
     for i, tran_data in enumerate(trans):
-        with DbProxy(gen_data_source_of_universal_db(tran_data.process_id), True) as db_instance:
+        with DbProxy(gen_data_source_of_universal_db(tran_data.process_id)) as db_instance:
             if tran_data.is_table_exist(db_instance):
                 data_count = tran_data.count_data(db_instance)
                 dic_proc_data_count[tran_data.process_id] = data_count

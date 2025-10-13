@@ -63,7 +63,7 @@ def get_url_to_redirect(request, proc_ids, page):
 
     # get start_datetime and end_datetime
     trans_data = TransactionData(proc_ids[0])
-    with DbProxy(gen_data_source_of_universal_db(proc_ids[0]), True, immediate_isolation_level=True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(proc_ids[0])) as db_instance:
         max_datetime = trans_data.get_max_date_time_by_process_id(db_instance)
         min_datetime = trans_data.get_min_date_time_by_process_id(db_instance)
 
@@ -183,7 +183,7 @@ def get_proc_config_infos(dic_preview: dict, limit: int = 5, is_v2=False, proces
         latest_rec = get_latest_records(
             None,
             None,
-            file_name=dic_preview.get('file_name'),
+            file_name=dic_preview.get('file_name') if is_file_path else None,
             directory=dic_preview.get('directory'),
             limit=limit,
             is_v2_datasource=is_v2,
@@ -354,6 +354,7 @@ def handle_importing_by_one_click(request):
             process_name=param.process_name,
             data_source_id=param.data_source_id,
             data_source_type=param.data_source_type,
+            interval_sec=param.polling_frequency,
             run_now=True,
             is_user_request=True,
             register_by_file_request_id=register_by_file_request_id,

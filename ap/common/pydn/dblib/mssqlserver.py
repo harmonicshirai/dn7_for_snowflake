@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MSSQLServer:
-    def __init__(self, host, dbname, username, password, port=1433):
+    def __init__(self, host, dbname, username, password, port=1433, read_only=False):
         self.host = host
         self.port = port
         self.dbname = dbname
@@ -28,6 +28,7 @@ class MSSQLServer:
         self.is_connected = False
         self.connection = None
         self._table_views = None
+        self.read_only = read_only
 
     @property
     def schema(self):
@@ -364,10 +365,7 @@ self.is_connected: {self.is_connected}
     def is_timezone_hold_column(self, tbl, col):
         data_type = self.get_data_type_by_colname(tbl, col)
 
-        if data_type and 'DATETIMEOFFSET' in data_type.upper():
-            return True
-
-        return False
+        return bool(data_type and 'DATETIMEOFFSET' in data_type.upper())
 
     def get_table(self, table_name):
         query = f"SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME LIKE '{table_name}'"

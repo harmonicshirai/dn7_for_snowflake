@@ -110,7 +110,7 @@ h6 {
 
 /* Tooltip CSS */
 .tooltip-parent .tooltip-content {
-    visibility: hidden;
+    display: none;
     width: 150px;
     background-color: rgba(8, 8, 8, 0.8);
     color: #fff;
@@ -129,11 +129,11 @@ h6 {
 }
 
 .tooltip-parent:hover .tooltip-content {
-    visibility: visible;
+    display: block;
 }
 
 .tooltip-parent-lg .tooltip-content-lg {
-    visibility: hidden;
+    display: none;
     background-color: rgba(8, 8, 8, 0.8);
     color: #fff;
     text-align: left;
@@ -150,7 +150,7 @@ h6 {
 }
 
 .tooltip-parent-lg:hover .tooltip-content-lg {
-    visibility: visible;
+    display: block;
 }
 
 /* End tooltip CSS */
@@ -369,4 +369,54 @@ h6 {
     border: 1px solid white;
     padding: 9px;
     max-width: 500px;
+}
+
+#equipTable tbody td,
+#equipTable tbody th {
+    height: 27px;
+    padding: 0 5px;
+    background-color: #303030;
+}
+
+#equipTable thead td,
+#equipTable thead th {
+    position: relative;
+    height: 27px;
+    padding: 0 5px;
+    background-color: #222222;
+}
+
+#equipTable .form-check-input {
+    width: 20px;
+    height: 20px;
+}
+
+#tableWrapper {
+    width: 100%;
+    max-height: 433px;
+    overflow: auto;
+}
+
+.checkbox-position {
+    position: relative;
+    top: 5%;
+}
+
+.col-shorten-name {
+    max-width: 240px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+table tbody tr.hovered {
+    outline: thin solid white !important;
+}
+
+#groupTable {
+    width: 100%;
+}
+
+#softwareWorkshopCfgForm .form-group {
+    margin-bottom: 0.6rem !important;
 }

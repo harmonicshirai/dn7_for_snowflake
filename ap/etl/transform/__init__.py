@@ -1,0 +1,45 @@
+import logging
+from abc import ABC, abstractmethod
+
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
+
+
+class TransformData(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    df: pd.DataFrame
+    # default mapping between column name and unit
+    name_unit_mapping: dict[str, str] = Field(default_factory=dict)
+
+    def with_df(self, df: pd.DataFrame) -> 'TransformData':
+        self.df = df
+        return self
+
+    def with_name_unit_mapping(self, name_unit_mapping: dict[str, str]) -> 'TransformData':
+        self.name_unit_mapping = name_unit_mapping
+        return self
+
+
+class BaseTransformer(ABC):
+    @abstractmethod
+    def transform(self, data: TransformData) -> TransformData:
+        """Transform from data to another data"""
+
+
+class TransformPipeline:
+    def __init__(self, *transformers: BaseTransformer):
+        self.transformers = transformers
+
+    def run(self, input_data: TransformData) -> TransformData:
+        """Run the pipeline"""
+        data = input_data
+        for transformer in self.transformers:
+            try:
+                data = transformer.transform(data)
+            except Exception as e:
+                logger.error(f'{transformer.__class__.__name__} failed')
+                raise e
+        return data

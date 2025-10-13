@@ -394,7 +394,7 @@ const setProcessName = (dataRowID = null) => {
 };
 
 // reload tables after change
-const loadTables = (databaseId, dataRowID = null, selectedTbl = null) => {
+const loadTables = async (databaseId, dataRowID = null, selectedTbl = null) => {
     // if new row have process name, set new process name in modal
     if (!databaseId || isEmpty(databaseId)) {
         setProcessName(dataRowID);
@@ -407,7 +407,7 @@ const loadTables = (databaseId, dataRowID = null, selectedTbl = null) => {
     const isHiddenFileInput = $(procModalElements.fileInputPreview).hasClass('hide');
     const isHiddenDbTble = $(procModalElements.grTableDropdown).hasClass('hide');
 
-    $.ajax({
+    await $.ajax({
         url: `api/setting/database_table/${databaseId}`,
         method: 'GET',
         cache: false,
@@ -465,15 +465,16 @@ const loadMergeModeTables = async (databaseId, dataRowID = null, selectedTbl = n
 };
 
 const loadTableNameSelectOptions = (data, optSelected, elemTbl) => {
-    const isSoftwareWorkshop = data.ds_type === DB_CONFIGS.SOFTWARE_WORKSHOP.configs.type;
-    const processFactIds = data.process_factids;
-    const masterTypes = data.master_types;
-    data.tables.forEach(function (tbl, index) {
+    const isSoftwareWorkshop = data?.ds_type === DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.configs.type;
+    const isSWSnowflake = data?.ds_type === DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type;
+    const processFactIds = data?.process_factids;
+    const masterTypes = data?.master_types;
+    data?.tables.forEach(function (tbl, index) {
         const options = {
             value: tbl,
             text: tbl,
-            process_fact_id: isSoftwareWorkshop ? processFactIds[index] : '',
-            master_type: isSoftwareWorkshop ? masterTypes[index] : '',
+            process_fact_id: isSoftwareWorkshop || isSWSnowflake ? processFactIds[index] : '',
+            master_type: isSoftwareWorkshop || isSWSnowflake ? masterTypes[index] : '',
         };
         if (optSelected && tbl === optSelected) {
             options.selected = 'selected';
@@ -556,7 +557,7 @@ const loadProcModal = async (procId = null, dataRowID = null, dbsId = null) => {
                 dbsId
             ) {
                 const defaultDSID = selectedDs || selectedDbInfo.id;
-                loadTables(defaultDSID, dataRowID, selectedTbls);
+                await loadTables(defaultDSID, dataRowID, selectedTbls);
             } else {
                 procModalElements.databases.trigger('change');
             }
@@ -572,7 +573,7 @@ const loadProcModal = async (procId = null, dataRowID = null, dbsId = null) => {
             const dataRowId = currentProcItem.attr('data-rowid');
             setProcessName(dataRowId);
             // gen header of spead table
-            SpreadSheetProcessConfig.create(procModalElements.procConfigTableName, []);
+            await SpreadSheetProcessConfig.create(procModalElements.procConfigTableName, []);
         }
     }
 
@@ -766,7 +767,7 @@ const generateProcessList = async (
         uniqueDataIntCatRows.push(uniqueDataIntCat.map((data) => data[dataRow.column_name]));
     });
 
-    const spreadsheet = SpreadSheetProcessConfig.create(tableId, dataRows, { registerByFile });
+    const spreadsheet = await SpreadSheetProcessConfig.create(tableId, dataRows, registerByFile);
     spreadsheet.updateUniqueSampleDataAttributes(
         uniqueDataCategoryRows,
         uniqueDataRealRows,
@@ -1739,13 +1740,6 @@ const collectMergeProcCfgData = () => {
                 colData.parent_id = originalCol ? originalCol.id : null;
                 if (colData.parent_id) {
                     // child col's datatype must match parent col's datatype
-                    colData.data_type = originalCol.data_type;
-                    colData.is_serial_no = originalCol.is_serial_no;
-                    colData.is_get_date = originalCol.is_get_date;
-                    colData.is_chain_of_me_functions = originalCol.is_chain_of_me_functions;
-                    colData.is_auto_increment = originalCol.is_auto_increment;
-                    colData.is_dummy_datetime = originalCol.is_dummy_datetime;
-                    colData.is_file_name = originalCol.is_file_name;
                     mergedCols.push(colData);
                 }
             }
@@ -1769,6 +1763,10 @@ const collectMergeProcCfgData = () => {
     };
 };
 
+const updateProcessRegisterStatus = (data) => {
+    updateProcessConfig({ data: data.process, bulk_register: true });
+};
+
 const updateProcessConfig = (res) => {
     procModalElements.procModal.modal('hide');
     procModalElements.confirmImportDataModal.modal('hide');
@@ -1781,7 +1779,7 @@ const updateProcessConfig = (res) => {
 
     // update GUI
     if (res.status !== HTTP_RESPONSE_CODE_500) {
-        if (!currentProcItem.length) {
+        if (res?.bulk_register || !currentProcItem?.length) {
             addProcToTable(
                 res.data.id,
                 res.data.name_en,
@@ -1789,6 +1787,8 @@ const updateProcessConfig = (res) => {
                 res.data.name_local,
                 res.data.shown_name,
                 res.data.data_source.id,
+                res.data.table_name,
+                res.data.data_source.name,
             );
         } else {
             // update parent process name
@@ -2362,11 +2362,10 @@ $(() => {
         recentEdit(procModalCurrentProcId);
     });
 
-    // load tables to modal combo box
-    loadTables(getSelectedOptionOfSelect(procModalElements.databases).val());
-
     // Databases onchange
-    procModalElements.databases.change(() => {
+    procModalElements.databases.change(async () => {
+        loading.css('z-index', 9999);
+        loading.show();
         procDsSelected = getSelectedOptionOfSelect(procModalElements.databases).val();
         if (
             isMergeModeFromProcConfig() &&
@@ -2380,17 +2379,21 @@ $(() => {
             isClickPreview = true;
             const dsSelected = getSelectedOptionOfSelect(procModalElements.databases).val();
             const dataRowId = currentProcItem.attr('data-rowid');
-            loadTables(dsSelected, dataRowId);
+            await loadTables(dsSelected, dataRowId);
         }
+        loading.hide();
         // not available from v4.7.10
         // GenerateDefaultImportFilterTable();
     });
 
     // Databases onchange merge mode
-    procModalElements.databasesMergeMode.change(() => {
+    procModalElements.databasesMergeMode.change(async () => {
+        loading.css('z-index', 9999);
+        loading.show();
         procDsSelected = getSelectedOptionOfSelect(procModalElements.databasesMergeMode).val();
         currentProcessName = procModalElements.procNameMergeMode.val();
-        mergeModeProcess();
+        await mergeModeProcess();
+        loading.hide();
     });
 
     // Merge mode tables onchange
@@ -2491,7 +2494,9 @@ $(() => {
             formData.set('masterType', masterType);
         }
         // set currentProcessId in order to check if we need to show generated column in backend
-        formData.set('currentProcessId', procModalCurrentProcId);
+        if (procModalCurrentProcId) {
+            formData.set('currentProcessId', procModalCurrentProcId);
+        }
         // get 1000 records by limit param
         formData.set('limit', 1000);
         // Set etl function

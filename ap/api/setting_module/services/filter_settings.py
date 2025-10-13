@@ -89,3 +89,9 @@ def save_filter_config(params):
 def delete_cfg_filter_from_db(filter_id):
     with make_session() as mss:
         CfgFilter.delete_by_id(mss, filter_id)
+
+
+def delete_cfg_filter_by_ids(filter_ids):
+    with make_session() as mss:
+        for filter_id in filter_ids:
+            CfgFilter.delete_by_id(mss, filter_id)

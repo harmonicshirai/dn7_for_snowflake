@@ -81,7 +81,7 @@ def trace_data():
         for formval in order_array_formval:
             col_id = formval[GET02_VALS_SELECT]
             data = [val for val in dic_param[ARRAY_PLOTDATA] if val[END_COL_ID] == col_id]
-            if len(data):
+            if data:
                 new_list.append(data[0])
         dic_param[ARRAY_PLOTDATA] = new_list
 

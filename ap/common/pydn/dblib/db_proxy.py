@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Union
 
@@ -10,6 +12,7 @@ from ap.common.pydn.dblib.mssqlserver import MSSQLServer
 from ap.common.pydn.dblib.mysql import MySQL
 from ap.common.pydn.dblib.oracle import Oracle
 from ap.common.pydn.dblib.postgresql import PostgreSQL
+from ap.common.pydn.dblib.snowflake import Snowflake
 from ap.common.pydn.dblib.sqlite import SQLite3
 from ap.setting_module.models import CfgDataSource, CfgDataSourceDB
 
@@ -19,7 +22,7 @@ class DbProxy:
     An interface for client to connect to many type of database
     """
 
-    db_instance: Union[SQLite3, None, PostgreSQL, Oracle, MySQL, MSSQLServer]
+    db_instance: Union[SQLite3, None, PostgreSQL, Oracle, MySQL, MSSQLServer, Snowflake]
     db_basic: CfgDataSource
     db_detail: CfgDataSourceDB
     dic_last_connect_failed_time = {}
@@ -28,17 +31,17 @@ class DbProxy:
         self,
         data_src,
         is_universal_db=False,
-        immediate_isolation_level=False,
         force_connect=False,
         dic_db_files=None,
         proc_id=None,
+        read_only: bool = False,
     ):
         self.dic_db_files = dic_db_files
         self.proc_id = proc_id
         self.is_universal_db = is_universal_db
-        self.isolation_level = immediate_isolation_level
+        self.isolation_level = False  # Temporary disable isolation feature to avoid db lock issue
         self.force_connect = force_connect
-        self.data_src = data_src
+        self.read_only = read_only
         if isinstance(data_src, CfgDataSource):
             self.db_basic = data_src
             self.db_detail = data_src.db_detail
@@ -50,12 +53,15 @@ class DbProxy:
             self.db_detail = self.db_basic.db_detail
 
     def check_latest_failed_connection(self):
+        if not self.db_basic.id:
+            return
         last_failed_time = DbProxy.dic_last_connect_failed_time.get(self.db_basic.id)
         if last_failed_time is not None and last_failed_time > add_seconds(seconds=-180):
             raise Exception(MSG_DB_CON_FAILED)
 
     def add_latest_failed_connection(self):
-        DbProxy.dic_last_connect_failed_time[self.db_basic.id] = datetime.utcnow()
+        if self.db_basic.id:
+            DbProxy.dic_last_connect_failed_time[self.db_basic.id] = datetime.utcnow()
 
     def remove_latest_failed_connection(self):
         DbProxy.dic_last_connect_failed_time.pop(self.db_basic.id, None)
@@ -107,6 +113,7 @@ class DbProxy:
         if db_type == DBType.SQLITE.value.lower():
             return sqlite.SQLite3(self.db_detail.dbname, isolation_level=self.isolation_level)
 
+        is_snowflake = db_type in [DBType.SNOWFLAKE.value.lower(), DBType.SNOWFLAKE_SOFTWARE_WORKSHOP.value.lower()]
         if db_type == DBType.POSTGRESQL.value.lower():
             target_db_class = PostgreSQL
         elif db_type == DBType.ORACLE.value.lower():
@@ -115,8 +122,10 @@ class DbProxy:
             target_db_class = MySQL
         elif db_type == DBType.MSSQLSERVER.value.lower():
             target_db_class = MSSQLServer
-        elif db_type == DBType.SOFTWARE_WORKSHOP.value.lower():
+        elif db_type == DBType.POSTGRES_SOFTWARE_WORKSHOP.value.lower():
             target_db_class = PostgreSQL
+        elif is_snowflake:
+            target_db_class = Snowflake
         else:
             raise Exception(MSG_NOT_SUPPORT_DB)
 
@@ -124,7 +133,43 @@ class DbProxy:
         if self.db_detail.hashed:
             password = decrypt_pwd(password)
 
-        db_instance = target_db_class(self.db_detail.host, self.db_detail.dbname, self.db_detail.username, password)
+        args = {'dbname': self.db_detail.dbname, 'read_only': self.read_only}
+        if is_snowflake:
+            if self.db_detail.hashed:
+                snowflake_private_key_file_pwd = decrypt_pwd(self.db_detail.snowflake_private_key_file_pwd)
+                snowflake_access_token = decrypt_pwd(self.db_detail.snowflake_access_token)
+            else:
+                snowflake_private_key_file_pwd = self.db_detail.snowflake_private_key_file_pwd
+                snowflake_access_token = self.db_detail.snowflake_access_token
+
+            # snowflake connector does not accept read only
+            args.pop('read_only', None)
+            args.update(
+                {
+                    'account': self.db_detail.host,
+                    'user': self.db_detail.username,
+                    'dbname': self.db_detail.dbname,
+                    'warehouse': self.db_detail.snowflake_warehouse,
+                    'role': self.db_detail.snowflake_role,
+                    'authentication_type': self.db_detail.snowflake_authentication_type,
+                    'access_token': snowflake_access_token,
+                    'private_key_file': self.db_detail.snowflake_private_key_file,
+                    'private_key_file_pwd': snowflake_private_key_file_pwd,
+                    'port': self.db_detail.port,
+                    'schema': self.db_detail.schema,
+                }
+            )
+        elif self.db_basic.type != DBType.SQLITE.name:
+            args.update(
+                {
+                    'host': self.db_detail.host,
+                    'username': self.db_detail.username,
+                    'password': password,
+                    'port': self.db_detail.port,
+                },
+            )
+
+        db_instance = target_db_class(**args)
 
         # use custom port or default port
         if self.db_detail.port:
@@ -158,4 +203,28 @@ def gen_data_source_of_universal_db(proc_id=None):
 
     db_detail.dbname = gen_sqlite3_file_name(proc_id)
 
+    return db_src
+
+
+def gen_data_source_software_workshop(
+    host: str | None = None,
+    port: int | None = None,
+    dbname: str | None = None,
+    schema: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    db_type: str | None = None,
+):
+    db_src = CfgDataSource()
+    db_detail = CfgDataSourceDB(
+        host=host,
+        port=port,
+        dbname=dbname,
+        schema=schema,
+        username=username,
+        password=password,
+    )
+
+    db_src.type = db_type
+    db_src.db_detail = db_detail
     return db_src

@@ -18,6 +18,7 @@ const serverSentEventType = {
     backupDataFinished: 'BACKUP_DATA_FINISHED',
     restoreDataFinished: 'RESTORE_DATA_FINISHED',
     transactionUpdated: 'TRANSACTION_UPDATED',
+    processBulkRegister: 'PROCESS_BULK_REGISTER',
 };
 
 /**
@@ -206,6 +207,13 @@ const handleSSEMessage = ({ type, data, broadcastType = ShouldBroadcast.DEFAULT 
     else if (type === serverSentEventType.dataRegister) {
         if (typeof updateDataRegisterStatus !== 'undefined') {
             updateDataRegisterStatus({ type, data });
+        }
+    }
+
+    // for data register page
+    else if (type === serverSentEventType.processBulkRegister) {
+        if (typeof updateProcessRegisterStatus !== 'undefined') {
+            updateProcessRegisterStatus(data);
         }
     }
 

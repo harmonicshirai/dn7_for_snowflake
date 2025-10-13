@@ -45,18 +45,19 @@
     </div>
 {% endmacro %}
 
-{% macro input_row(name, label, value='', type='text',label_block_cnt = 4,input_block_cnt = 8, id='') %}
-    <div class="form-group row">
-        <label for="{{ id or name }}" class="col-sm-{{ label_block_cnt }} col-form-label label-right">
+{% macro input_row(name, label, value='', type='text',label_block_cnt = 4,input_block_cnt = 8, id='', label_class = '', input_class = '', margin_bottom_class = '', placeholder='') %}
+    <div class="form-group row {{ margin_bottom_class }}">
+        <label for="{{ id or name }}" class="col-sm-{{ label_block_cnt }} col-form-label label-right {{ label_class }}">
             <h5>{{ _(label) }}</h5>
         </label>
-        <div class="col-sm-{{ input_block_cnt }}">
+        <div class="col-sm-{{ input_block_cnt }} {{ input_class }}">
             <input
                 type="{{ type }}"
                 name="{{ name }}"
                 class="form-control"
+                placeholder="{{ placeholder }}"
                 id="{{ id or name }}"
-                {% if type == 'password' %}autocomplete=on{% else %}data-observer{% endif %}
+                {% if type == 'password' %}autocomplete="new_password"{% else %}data-observer{% endif %}
             />
             <span
                 id="{{ id or name }}-error-msg"
@@ -479,6 +480,18 @@
         {{ _('Test connection') }}
     </button>
     <span id="{{ msgID }}" class="check-db-msg text-left mr-auto" style="text-align:left"></span>
+{% endmacro %}
+
+{% macro preview_software_workshop(dbType, html, btnID, msgID) %}
+    <button
+        id="{{ btnID }}"
+        onclick="previewSoftwareWorkshop('{{ dbType.lower() }}', '{{ html }}', '{{ msgID }}')"
+        class="btn btn-secondary"
+        style="width: 125px;"
+    >
+        {{ _('Test connection') }}
+    </button>
+    <span id="{{ msgID }}" class="check-db-msg text-left mr-auto position-absolute text-left" style="top: 35px;"></span>
 {% endmacro %}
 
 {% macro import_status(db_id, status) %}
@@ -2607,5 +2620,48 @@
         <label class="custom-control-label {{ hintText }}" title="{{ hoverTitle }}" for="{{ id }}"
             >{{ _(title) }}</label
         >
+    </div>
+{% endmacro %}
+
+{% macro polling_frequency_option(dbs_type, polling_frequency, is_authorized, options = [0, 3, 5 ,10, 60, 1440], hide_label = False, className='') %}
+    {%
+        set polling_title = {
+            0: _("Only once"),
+            3: _("Once per 3 minutes"),
+            5: _("Once per 5 minutes"),
+            10: _("Once per 10 minutes"),
+            60: _("Once per hour"),
+            1440: _("Once per day")
+        }
+    %}
+
+    <div class="d-flex align-items-center w-auto">
+        {% if not hide_label %}
+            <label
+                for="{{ dbs_type }}pollingFreq"
+                class="col-form-label vertical-center"
+                style="margin: 0 15px 0 0; padding: 0;"
+            >
+                <h5 class="mr-2 mb-0">{{ _("Polling Frequency") }}</h5>
+            </label>
+        {% endif %}
+        <div class="{{ 'w-100' if hide_label else 'w-auto' }}">
+            <select
+                type="select"
+                name="{{ dbs_type }}pollingFreq"
+                class="form-control {{ className }}"
+                id="{{ dbs_type }}pollingFreq"
+                old-value="{{ polling_frequency }}"
+                {% if not is_authorized %}
+                    disabled
+                {% endif %}
+            >
+                {% for option in options %}
+                    <option value="{{ option }}" {{ 'selected' if polling_frequency == option else '' }}>
+                        {{ polling_title[option] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
     </div>
 {% endmacro %}

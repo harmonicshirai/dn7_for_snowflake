@@ -70,7 +70,7 @@ def get_data_count_by_time_range(proc_id, start_date, end_date, query_type, loca
     min_val = None
     max_val = None
 
-    with DbProxy(gen_data_source_of_universal_db(proc_id), True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(proc_id)) as db_instance:
         trans_data = TransactionData(proc_id)
         _, data_count = trans_data.select_data_count(db_instance, start_date, end_date, count_in_file)
 

@@ -1,8 +1,9 @@
 import logging
 import math
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from functools import partial
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -28,20 +29,26 @@ from ap.common.pydn.dblib import mssqlserver, mysql, oracle
 logger = logging.getLogger(__name__)
 
 
-@log_execution_time()
-def detect_timezone(dt_input):
+def parse_datetime(dt_input: Any) -> Optional[datetime]:
+    """Parse datetime from string, datetime, etc"""
+    try:
+        if isinstance(dt_input, str):
+            return parser.parse(dt_input)
+        elif isinstance(dt_input, datetime):
+            return dt_input
+    except Exception as ex:
+        logger.exception(ex)
+    return None
+
+
+def detect_timezone(dt_input: Any) -> Optional[tzinfo]:
     """
     Detect timezone of a datetime string. e.g. 2019-05-14T09:01:04.000000Z/2019-05-14T09:01:04.000000,...
     Return timezone object
     """
-    try:
-        if isinstance(dt_input, str):
-            dt = parser.parse(dt_input)
-            return dt.tzinfo
-        elif isinstance(dt_input, datetime):
-            return dt_input.tzinfo
-    except Exception as ex:
-        logger.error(ex)
+    dt_output = parse_datetime(dt_input)
+    if dt_output is not None:
+        return dt_output.tzinfo
     return None
 
 
@@ -152,7 +159,7 @@ def gen_sql(db_instance, table_name, get_date_col):
 
     sql = f'from {table_name} where {get_date_col} is not null'
     if isinstance(db_instance, mssqlserver.MSSQLServer):
-        sql = f'select top 1 convert(varchar(30), {get_date_col}, 127) {get_date_col}, 0 {sql}'
+        sql = f'select top 1 convert(varchar(30), {get_date_col}, 120) {get_date_col}, 0 {sql}'
     elif isinstance(db_instance, oracle.Oracle):
         data_type = db_instance.get_data_type_by_colname(table_name.strip('"'), get_date_col.strip('"'))
         format_str = 'TZR' if data_type and 'TIME ZONE' in data_type else None

@@ -230,6 +230,7 @@ class JspreadSheetTable {
                     customEvents.onload(instance);
                 }
                 spreadsheet.handleOneClickDropDown();
+                spreadsheet.handlePasteDropdownSearch();
             },
             /**
              * Custom onchange event to check if the table has changes.
@@ -365,6 +366,21 @@ class JspreadSheetTable {
                     customEvents.onredo(instance, historyRecord);
                 }
             },
+
+            /**
+             * On selection event.
+             * @param {HTMLDivElement} instance - a jexcel container div element.
+             * @param {number} x1 - x coordinate of the top-left cell.
+             * @param {number} y1 - y coordinate of the top-left cell.
+             * @param {number} x2 - x coordinate of the bottom-right cell.
+             * @param {number} y2 - y coordinate of the bottom-right cell.
+             * @param {*} origin - the origin of the selection.
+             */
+            onselection: (instance, x1, y1, x2, y2, origin) => {
+                if (customEvents.onselection != null) {
+                    customEvents.onselection(instance, x1, y1, x2, y2, origin);
+                }
+            },
         };
         const inner = jspreadsheet(document.getElementById(tableId), {
             ...options,
@@ -420,6 +436,17 @@ class JspreadSheetTable {
         spreadsheet.table.rows.forEach((row, index) => {
             row.cells[0].textContent = checkSpecialRow(tableDataRows[index]) ? '' : index - numberOfSpecialRows + 1;
         });
+    }
+
+    expandWidthForFormulaWhenFocus(spreadsheet, x, y) {
+        const index = spreadsheet.getIndexHeaderByName(PROCESS_COLUMNS.judge_formula);
+        const data = spreadsheet.getDataFromCoords(x, y);
+        const width = getCellTextWidth(data);
+        if (x === index) {
+            spreadsheet.table.setWidth(index, width + 100);
+        } else {
+            spreadsheet.table.setWidth(index, 100);
+        }
     }
 
     /**
@@ -1303,6 +1330,35 @@ class JspreadSheetTable {
             (value) => value,
         );
         return sampleDataCells;
+    }
+
+    /**
+     * This function handle pasting excel into dropdown search input, then paste into table.
+     */
+    handlePasteDropdownSearch() {
+        document.addEventListener('click', () => {
+            const autocompleteInput = document.querySelector('.jdropdown-header');
+            if (autocompleteInput && !autocompleteInput._hasInputListener) {
+                autocompleteInput.addEventListener('paste', (e) => {
+                    const clipboardData = e.clipboardData;
+                    const pastedText = clipboardData.getData('text/plain');
+                    const [col, row] = this.table.selectedCell;
+
+                    // get value check has tab csv tsv format
+                    if (/\t/.test(pastedText)) {
+                        // remove text if input and close dropdown
+                        e.currentTarget.value = '';
+                        const cell = this.table.getCellFromCoords(Number(col), Number(row));
+                        cell.closest('div.jexcel_container').jexcel.closeEditor(cell, true);
+
+                        // past value from this cell
+                        this.table.paste(Number(col), Number(row), pastedText);
+                        bindClickDropdown();
+                    }
+                });
+                autocompleteInput._hasInputListener = true;
+            }
+        });
     }
 }
 

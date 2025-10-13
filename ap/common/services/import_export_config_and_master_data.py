@@ -7,11 +7,8 @@ from time import sleep
 from typing import Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from flask import current_app
-
 from ap import scheduler
 from ap.common.constants import (
-    APP_DB_FILE,
     PROCESS_QUEUE_FILE_NAME,
 )
 from ap.common.jobs.jobs import RunningJobs, RunningJobStatus
@@ -29,23 +26,6 @@ from ap.common.path_utils import (
 from ap.common.pydn.dblib.db_proxy import DbProxy, gen_data_source_of_universal_db
 from ap.common.services.import_export_config_n_data import (
     download_zip_file,
-)
-from ap.script.migrate_cfg_data_source_csv import migrate_cfg_data_source_csv
-from ap.script.migrate_cfg_process import migrate_cfg_process
-from ap.script.migrate_cfg_process_column import migrate_cfg_process_column
-from ap.script.migrate_csv_datatype import migrate_csv_datatype
-from ap.script.migrate_csv_dummy_datetime import migrate_csv_dummy_datetime
-from ap.script.migrate_csv_save_graph_settings import migrate_csv_save_graph_settings
-from ap.script.migrate_delta_time import migrate_delta_time_in_cfg_trace_key
-from ap.script.migrate_m_function import migrate_m_function_data
-from ap.script.migrate_m_unit import migrate_m_unit_data
-from ap.script.migrate_process_file_name_column import (
-    migrate_cfg_process_add_file_name,
-    migrate_cfg_process_column_add_column_raw_dtype,
-    migrate_cfg_process_column_add_column_raw_name,
-    migrate_cfg_process_column_add_column_type,
-    migrate_cfg_process_column_add_parent_id,
-    migrate_cfg_process_column_change_all_generated_datetime_column_type,
 )
 from ap.setting_module.models import CfgProcess
 from ap.trace_data.transaction_model import TransactionData
@@ -103,15 +83,15 @@ def import_config_and_master(file_path):
     file_names = sorted(input_zip.namelist())
     for name in file_names:
         if name in [PREVIEW_DATA_FILE_NAME]:
-            with ZipFile(input_zip.open(name)) as file_path:
-                file_path.extractall(get_preview_data_path())
+            with ZipFile(input_zip.open(name)) as f:
+                f.extractall(get_preview_data_path())
             continue
 
         input_zip.extract(name, get_instance_path())
 
 
 def truncate_datatables():
-    trans = [TransactionData(proc.id) for proc in CfgProcess.get_all_ids()]
+    trans = [TransactionData(proc_id) for proc_id in CfgProcess.get_all_ids()]
     for i, tran_data in enumerate(trans):
         with DbProxy(gen_data_source_of_universal_db(tran_data.process_id), True) as db_instance:
             transaction_tbls = [
@@ -127,7 +107,7 @@ def truncate_datatables():
 
 
 def delete_t_process_tables():
-    trans = [TransactionData(proc.id) for proc in CfgProcess.get_all_ids()]
+    trans = [TransactionData(proc_id) for proc_id in CfgProcess.get_all_ids()]
     for i, tran_data in enumerate(trans):
         with DbProxy(gen_data_source_of_universal_db(tran_data.process_id), True) as db_instance:
             sql = f'DELETE FROM {tran_data.table_name};'
@@ -249,25 +229,3 @@ def cleanup_backup_data():
                 os.remove(backup_path)
             else:
                 shutil.rmtree(backup_path)
-
-
-def run_migrations():
-    migrate_csv_datatype(current_app.config.get(APP_DB_FILE))
-    migrate_csv_dummy_datetime(current_app.config.get(APP_DB_FILE))
-    migrate_csv_save_graph_settings(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_data_source_csv(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_add_file_name(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column_add_column_raw_name(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column_add_column_raw_dtype(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column_add_column_type(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column_add_parent_id(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process_column_change_all_generated_datetime_column_type(current_app.config.get(APP_DB_FILE))
-    migrate_cfg_process(current_app.config.get(APP_DB_FILE))
-
-    # migrate function data
-    migrate_m_function_data(current_app.config.get(APP_DB_FILE))
-    # migrate delta_time
-    migrate_delta_time_in_cfg_trace_key(current_app.config.get(APP_DB_FILE))
-    # migrate units data
-    migrate_m_unit_data(current_app.config.get(APP_DB_FILE))

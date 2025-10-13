@@ -15,7 +15,6 @@ const i18n = {
     process: $('#i18nProcess').text(),
     detail: $('#i18nDetail').text(),
     failedJobPageTitle: $('#i18nFailedJobList').text(),
-    DEL_PROCESS: $('#i18nDEL_PROCESS').text(),
     CSV_IMPORT: $('#i18nCSV_IMPORT').text(),
     FACTORY_IMPORT: $('#i18nFACTORY_IMPORT').text(),
     GEN_GLOBAL: $('#i18nGEN_GLOBAL').text(),
@@ -87,14 +86,7 @@ const NON_FAILED_JOB_STATUS = [
 ];
 
 const convertJobName = (jobName) => {
-    const defaultJobNames = [
-        'DEL_PROCESS',
-        'CSV_IMPORT',
-        'FACTORY_IMPORT',
-        'GEN_GLOBAL',
-        'CLEAN_DATA',
-        'FACTORY_PAST_IMPORT',
-    ];
+    const defaultJobNames = ['CSV_IMPORT', 'FACTORY_IMPORT', 'GEN_GLOBAL', 'CLEAN_DATA', 'FACTORY_PAST_IMPORT'];
     if (defaultJobNames.includes(jobName)) {
         return i18n[jobName];
     }

@@ -58,17 +58,19 @@ from ap.common.constants import (
     COMMA_BETWEEN_NUMBERS_REGEX,
     COMPLETED_PERCENT,
     DATA_TYPE_DUPLICATE_MSG,
-    DATA_TYPE_ERROR_EMPTY_DATA,
     DATA_TYPE_ERROR_MSG,
     DATE_FORMAT,
+    DATE_FORMAT_STR,
     DATE_FORMAT_STR_ONLY_DIGIT,
     DATE_TYPE_REGEX,
     DATETIME_DUMMY,
     DATETIME_TYPE_MD,
     DATETIME_TYPE_YMD,
     DATETIME_TYPE_YMD_HMS,
+    EMPTY_CHECK_TIME_PERIOD,
     EMPTY_STRING,
     FILE_NAME,
+    IMPORT_CSV_EMPTY_DATA,
     NUM_CHARS_THRESHOLD,
     TIME_FORMAT_WITH_SEC,
     TIME_TYPE_REGEX,
@@ -78,8 +80,6 @@ from ap.common.constants import (
     DBType,
     JobStatus,
     JobType,
-    DATE_FORMAT_STR,
-    EMPTY_CHECK_TIME_PERIOD,
 )
 from ap.common.datetime_format_utils import convert_datetime_format
 from ap.common.disk_usage import get_ip_address
@@ -186,7 +186,7 @@ def import_csv(proc_id, record_per_commit=RECORD_PER_COMMIT, register_by_file_re
     )
 
     trans_data = TransactionData(proc_cfg)
-    with DbProxy(gen_data_source_of_universal_db(proc_id), True, immediate_isolation_level=True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(proc_id), True) as db_instance:
         trans_data.create_table(db_instance)
 
         # get import files
@@ -369,7 +369,7 @@ def import_csv(proc_id, record_per_commit=RECORD_PER_COMMIT, register_by_file_re
             # re-arrange cols
             valid_columns = [col for col in csv_cols if col in valid_columns]
             dic_valid_csv_cols = dict(zip(valid_columns, [False] * len(valid_columns)))
-            missing_cols = [] if len(valid_columns) else list(dic_use_cols.keys())
+            missing_cols = [] if valid_columns else list(dic_use_cols.keys())
 
             if not is_v2_datasource:
                 valid_with_dupl_cols = [dic_csv_cols[col] for col in valid_columns]
@@ -642,12 +642,12 @@ def import_csv(proc_id, record_per_commit=RECORD_PER_COMMIT, register_by_file_re
             parent_cfg_process=cfg_parent_proc,
         )
         total_imported_row += save_res
-        if is_first_chunk and register_by_file_request_id:
+        if register_by_file_request_id:
             data_register_data = {
                 'RegisterByFileRequestID': register_by_file_request_id,
-                'status': JobStatus.PROCESSING.name,
+                'status': JobStatus.DONE.name,
                 'process_id': proc_id,
-                'is_first_imported': True,
+                'is_first_imported': is_first_chunk,
                 'use_dummy_datetime': use_dummy_datetime,
             }
             EventQueue.put(
@@ -690,7 +690,7 @@ def import_csv(proc_id, record_per_commit=RECORD_PER_COMMIT, register_by_file_re
 
     if total_imported_row == 0:
         # if there is empty data in all files
-        error_type = DATA_TYPE_ERROR_EMPTY_DATA
+        error_type = IMPORT_CSV_EMPTY_DATA
 
     if error_type:
         save_failed_import_history(proc_id, job_info, error_type)
@@ -786,7 +786,7 @@ def validate_columns(checked_cols, csv_cols, use_dummy_datetime, dummy_datetime_
     """
     # ng_cols = set(csv_cols) - set(checked_cols)
     valid_cols = list(set(checked_cols).intersection(csv_cols))
-    ng_cols = [] if len(valid_cols) else list(csv_cols)
+    ng_cols = [] if valid_cols else list(csv_cols)
     # remove dummy datetime columns from set to skip validate this column
     if use_dummy_datetime and dummy_datetime_col in ng_cols:
         ng_cols.remove(dummy_datetime_col)
@@ -903,7 +903,11 @@ def get_import_target_files(proc_id, data_src, trans_data, db_instance):
 
     # filter target files
     has_trans_targets, no_trans_targets, toast_skip = filter_import_target_file(
-        proc_id, csv_files, dic_success_file, dic_error_file, data_src.etl_func
+        proc_id,
+        csv_files,
+        dic_success_file,
+        dic_error_file,
+        data_src.etl_func,
     )
     return has_trans_targets, no_trans_targets, toast_skip
 
@@ -955,7 +959,7 @@ def remove_duplicates(
     df_columns = list(set(df.columns.tolist()).intersection(dic_cols.values()))
 
     # remove duplicate in csv files
-    if len(df_columns):
+    if df_columns:
         # check if FileName in df
         filename_cols = [cfg_col.column_name for cfg_col in cfg_columns if cfg_col.is_file_name]
         if filename_cols and (filename_col := filename_cols[0]) in df_columns:
@@ -1002,7 +1006,7 @@ def get_duplicate_info(df_csv: DataFrame, df_db: DataFrame, col_dtypes=None) -> 
     same_column_names = list(db_column_names & csv_column_names)
     missing_column_names = list(db_column_names - csv_column_names)
 
-    if not len(same_column_names):
+    if not same_column_names:
         return pd.Index([])
 
     # fill None if df_csv missing column
@@ -1293,8 +1297,8 @@ def yield_job_info(
             err_cnt=df_error_cnt,
             err_msgs=err_msgs,
         )
-        with job_info.interruptible(is_safe_interrupt) as job_info:
-            yield job_info
+        with job_info.interruptible(is_safe_interrupt) as job:
+            yield job
     except Exception:
         pass
 

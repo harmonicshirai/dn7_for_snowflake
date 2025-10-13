@@ -15,8 +15,13 @@ from sqlalchemy.sql.ddl import CreateIndex, CreateTable
 from ap import log_execution_time
 from ap.api.common.services.utils import gen_sql_and_params, gen_sql_compiled_stmt
 from ap.common.common_utils import (
+    BoundType,
+    TimeRange,
+    convert_to_datetime,
+    convert_to_str,
     gen_data_count_table_name,
     gen_import_history_table_name,
+    gen_pull_history_table_name,
     get_type_all_columns,
 )
 from ap.common.constants import (
@@ -549,12 +554,11 @@ WHERE type = 'index'
     @staticmethod
     def add_columns(db_instance, table_name: str, dict_col_with_type: dict[str, str], auto_commit: bool = True):
         exist_columns = TransactionData.get_table_columns(db_instance, table_name)
-        for column_name in dict_col_with_type.keys():
+        for column_name, _data_type in dict_col_with_type.items():
             if column_name in exist_columns:
                 continue
 
-            data_type = dict_col_with_type[column_name]
-            data_type = DataType.correct_data_type(data_type)
+            data_type = DataType.correct_data_type(_data_type)
             TransactionData.add_column(db_instance, table_name, column_name, data_type, auto_commit=auto_commit)
 
     def get_column_name(self, column_id, brs_column_name=True):
@@ -1121,3 +1125,78 @@ class ImportHistoryTable(BaseModel):
         create_index_stmt = CreateIndex(index, if_not_exists=True)
         sqlite3_compiled_stmt = gen_sql_compiled_stmt(create_index_stmt)
         return sqlite3_compiled_stmt.string
+
+
+class PullHistoryRecord(BaseModel):
+    id: int = 1
+    pull_from: Optional[str]
+    pull_to: Optional[str]
+
+    def set_pull_from(self, value: datetime):
+        self.pull_from = convert_to_str(value)
+
+    def set_pull_to(self, value: datetime):
+        self.pull_to = convert_to_str(value)
+
+    def time_range(self, timezone) -> TimeRange:
+        return TimeRange(
+            min_ts=convert_to_datetime(self.pull_from, timezone),
+            min_ts_bound_type=BoundType.INCLUDED,
+            max_ts=convert_to_datetime(self.pull_to, timezone),
+            max_ts_bound_type=BoundType.INCLUDED,
+        )
+
+
+class PullHistoryTable:
+    @classmethod
+    def get_table_name(cls, process_id: int) -> str:
+        return gen_pull_history_table_name(process_id)
+
+    @classmethod
+    def table(cls, process_id: int):
+        return sa.Table(
+            cls.get_table_name(process_id),
+            sa.MetaData(),
+            sa.Column('id', sa.Integer, primary_key=True),
+            sa.Column('pull_from', sa.Text, nullable=False),
+            sa.Column('pull_to', sa.Text, nullable=False),
+        )
+
+    @classmethod
+    def create_table_sql(cls, process_id: int) -> str:
+        table = cls.table(process_id)
+        create_table_stmt = CreateTable(table, if_not_exists=True)
+        sqlite3_compiled_stmt = gen_sql_compiled_stmt(create_table_stmt)
+        return sqlite3_compiled_stmt.string
+
+    @classmethod
+    def create_table(cls, db_instance, process_id: int, auto_commit: bool = True):
+        table_name = cls.get_table_name(process_id)
+        if table_name in db_instance.list_tables():
+            return table_name
+
+        sql = cls.create_table_sql(process_id)
+        db_instance.execute_sql(sql, auto_commit=auto_commit)
+
+        return table_name
+
+    @classmethod
+    def get(cls, db_instance, process_id: int) -> Optional[PullHistoryRecord]:
+        table = cls.table(process_id)
+        stmt = table.select()
+        sql, params = gen_sql_and_params(stmt)
+        _, rows = db_instance.run_sql(sql)
+        return next(map(PullHistoryRecord.model_validate, rows), PullHistoryRecord(pull_from=None, pull_to=None))
+
+    @classmethod
+    def set(cls, db_instance, process_id: int, record: PullHistoryRecord):
+        table = cls.table(process_id)
+        upsert_stmt = sa.sql.text(
+            f"""
+INSERT OR REPLACE INTO {table.name}
+({table.c.id.name}, {table.c.pull_from.name}, {table.c.pull_to.name}) VALUES
+(:{table.c.id.name}, :{table.c.pull_from.name}, :{table.c.pull_to.name})
+"""
+        ).bindparams(id=record.id, pull_from=record.pull_from, pull_to=record.pull_to)
+        sql, params = gen_sql_and_params(upsert_stmt)
+        db_instance.run_sql(sql, params=params)

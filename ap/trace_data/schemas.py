@@ -212,6 +212,8 @@ class CommonParam:
 
     outliers = None
 
+    is_order_by_time: bool
+
     def __init__(
         self,
         start_proc=None,
@@ -267,6 +269,7 @@ class CommonParam:
         nominal_vars=[],
         cate_col_ids=[],
         traincond_procs=None,
+        is_order_by_time=True,
     ):
         self.start_proc = int(start_proc) if str(start_proc).isnumeric() else None
         self.start_date = start_date
@@ -289,6 +292,7 @@ class CommonParam:
         self.cond_procs = cond_procs
         self.cate_procs = cate_procs
         self.threshold_boxes = [int(filter_detail_id) for filter_detail_id in threshold_boxes if filter_detail_id]
+        self.is_order_by_time = is_order_by_time
 
         if not cat_exp:
             self.cat_exp = []
@@ -526,7 +530,7 @@ class DicParam:
     def get_col_info_by_id(self, col_id):
         target_cols = self.get_all_target_cols()
         cols = [col for col in target_cols if str(col[END_COL_ID]) == str(col_id)]
-        return cols[0] if len(cols) else None
+        return cols[0] if cols else None
 
     def get_color_id(self, target_var: int) -> Optional[int]:
         if self.common.agp_color_vars is None:

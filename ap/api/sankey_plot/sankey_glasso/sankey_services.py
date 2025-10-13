@@ -461,7 +461,7 @@ def plot_barchart_grplasso(dic_bar: defaultdict, dic_proc_cfgs: dict, dic_col_pr
                 label = f'{dic_proc_cfgs[dic_col_proc_id[col_id]].shown_name}|{label}'
             sensor_label.append(label)
 
-    if len(sensor_label) and dic_bar[TASK_KEY] == 'multiclass':
+    if sensor_label and dic_bar[TASK_KEY] == 'multiclass':
         idx_df = [item[0] for item in dic_bar[BAR_COLORS]]
         df_group = pd.DataFrame(dic_bar[COEF], columns=sensor_label)
         df_group.index = idx_df

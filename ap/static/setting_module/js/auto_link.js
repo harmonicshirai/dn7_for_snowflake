@@ -72,15 +72,20 @@ const linkProcesses = (processList) => {
         const toProc = linkProcs[i + 1];
         const edgeData = {
             ...trace,
-            from: fromProc.id,
-            to: toProc.id,
-            target_proc: toProc.id,
-            self_proc: fromProc.id,
-            self_col: [fromProc.serial_column_id],
-            back_orig_col: [fromProc.serial_column_id],
-            target_col: [toProc.serial_column_id],
-            target_orig_col: [toProc.serial_column_id],
+            from: parseInt(fromProc.id),
+            to: parseInt(toProc.id),
+            target_proc: parseInt(toProc.id),
+            self_proc: parseInt(fromProc.id),
+            self_col: [parseInt(fromProc.serial_column_id)],
+            back_orig_col: [parseInt(fromProc.serial_column_id)],
+            target_col: [parseInt(toProc.serial_column_id)],
+            target_orig_col: [parseInt(toProc.serial_column_id)],
             id: create_UUID(),
+            font: {
+                multi: false,
+                strokeColor: COLOR.background,
+                align: 'top',
+            },
         };
         mapIdFromIdTo2Edge[`${edgeData.from}-${edgeData.to}`] = edgeData;
         edges.update(edgeData);

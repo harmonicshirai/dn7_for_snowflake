@@ -321,10 +321,7 @@ def send_google_analytic():
 
     send_result = send_gtag(ec=EventCategory.INPUT_DATA.value, ea=event_type + '_ds', el=event_label, ev=data_size)
 
-    if not send_result:
-        return False
-
-    return True
+    return send_result
 
 
 @log_execution_time()

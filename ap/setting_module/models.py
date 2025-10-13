@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import unicodedata
 from contextlib import contextmanager
 from copy import copy
+from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, Generator, List, Optional, Union
 
@@ -12,6 +14,7 @@ import pandas as pd
 import sqlalchemy
 from flask import g
 from flask_babel import get_locale
+from pytz import tzinfo
 from sqlalchemy import ForeignKey, asc, desc, func, null, or_
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.inspection import inspect
@@ -29,6 +32,7 @@ from typing_extensions import Self
 from ap import Session, db
 from ap.common.common_utils import (
     chunks,
+    convert_to_datetime,
     dict_deep_merge,
     gen_bridge_column_name,
     gen_data_count_table_name,
@@ -55,6 +59,7 @@ from ap.common.constants import (
     FlaskGKey,
     FunctionCastDataType,
     JobStatus,
+    JudgeDefinition,
     MasterDBType,
     MaxGraphNumber,
     RawDataTypeDB,
@@ -68,11 +73,13 @@ from ap.common.services.jp_to_romaji_utils import to_romaji
 from ap.common.services.normalization import NORMALIZE_FORM_NFKC
 from ap.common.trace_data_log import Location, LogLevel, ReturnCode
 
+logger = logging.getLogger(__name__)
+
 db_timestamp = db.TIMESTAMP
 
 
 @contextmanager
-def make_session() -> Generator[scoped_session]:
+def make_session(ignore_trigger: bool = False) -> Generator[scoped_session]:
     try:
         session: scoped_session = g.setdefault(FlaskGKey.APP_DB_SESSION.name, Session())
     except Exception:
@@ -80,6 +87,11 @@ def make_session() -> Generator[scoped_session]:
         session = Session()
 
     try:
+        # Set attribute to determine if this session need to trigger change or not
+        from ap.common.session.config_changes import SessionConfigChanges
+
+        setattr(session, SessionConfigChanges.IGNORE_TRIGGER_KEY, ignore_trigger)
+
         yield session
         session.commit()
     except Exception as e:
@@ -361,9 +373,7 @@ class CfgConstant(db.Model):
             cls.name == data_source_id,
         ).first()
 
-        if efa_header_flag and efa_header_flag.value and efa_header_flag.value == EFA_HEADER_FLAG:
-            return True
-        return False
+        return bool(efa_header_flag and efa_header_flag.value and efa_header_flag.value == EFA_HEADER_FLAG)
 
     @classmethod
     def get_warning_disk_usage(cls) -> int:
@@ -422,6 +432,7 @@ class CfgDataSource(db.Model):
     type: Mapped[str]
     comment: Mapped[Optional[str]]
     order: Mapped[Optional[int]]
+    polling_frequency: Mapped[Optional[int]]
     created_at: Mapped[str] = mapped_column(default=get_current_timestamp)
     updated_at: Mapped[str] = mapped_column(default=get_current_timestamp, onupdate=get_current_timestamp)
     db_detail: Mapped['CfgDataSourceDB'] = relationship(
@@ -436,6 +447,11 @@ class CfgDataSource(db.Model):
         back_populates='data_source',
         cascade='all, delete, delete-orphan',
     )
+
+    @classmethod
+    def get_by_id(cls, id: int, session: scoped_session = None) -> CfgDataSource:
+        query = session.query(cls) if session else cls.query
+        return query.get(id)
 
     @classmethod
     def delete(cls, meta_session, id):
@@ -462,6 +478,10 @@ class CfgDataSource(db.Model):
         return all_ds
 
     @classmethod
+    def get_ids_by_type(cls, type_value: str) -> list[int]:
+        return [ds.id for ds in cls.query.filter(cls.type == type_value).all()]
+
+    @classmethod
     def get_ds(cls, ds_id):
         ds = cls.query.get(ds_id)
         db_detail: CfgDataSourceDB = ds.db_detail
@@ -473,6 +493,10 @@ class CfgDataSource(db.Model):
     @classmethod
     def update_order(cls, meta_session, data_source_id, order):
         meta_session.query(cls).filter(cls.id == data_source_id).update({cls.order: order})
+
+    @classmethod
+    def update_polling_freq(cls, meta_session, data_source_id, polling_frequency):
+        meta_session.query(cls).filter(cls.id == data_source_id).update({cls.polling_frequency: polling_frequency})
 
     @classmethod
     def check_duplicated_name(cls, dbs_name):
@@ -495,6 +519,18 @@ class CfgDataSource(db.Model):
         return_cfg_data_source.csv_detail = self.csv_detail.clone() if self.csv_detail else None
         return return_cfg_data_source
 
+    @classmethod
+    def get_by_db_types(cls, db_types: list[DBType]):
+        return cls.query.filter(cls.type.in_([db_type.name for db_type in db_types])).all()
+
+    # todo: ask HoangNT to delete this func
+    # @classmethod
+    # def get_all_polling_frequency(cls, ds_id=None, session: scoped_session = None):
+    #     query = session.query(cls) if session else cls.query
+    #     if ds_id is not None:
+    #         query = query.filter(cls.id == ds_id)
+    #     return query.options(load_only(cls.polling_frequency, cls.id)).all()
+
     # @classmethod
     # def get_detail(cls, id):
     #     ds = cls.query.get(id)
@@ -511,6 +547,27 @@ class CfgDataSource(db.Model):
     #
     #     return rec
 
+    def software_workshop_def(self):
+        if self.type == DBType.SNOWFLAKE_SOFTWARE_WORKSHOP.name:
+            # FIXME: handle normal snowflake
+            from ap.api.setting_module.services.software_workshop_etl_services import (
+                SNOWFLAKE_SOFTWARE_WORKSHOP_DEF,
+            )
+
+            return SNOWFLAKE_SOFTWARE_WORKSHOP_DEF
+        elif self.type == DBType.POSTGRES_SOFTWARE_WORKSHOP.name:
+            from ap.api.setting_module.services.software_workshop_etl_services import (
+                POSTGRES_SOFTWARE_WORKSHOP_DEF,
+            )
+
+            return POSTGRES_SOFTWARE_WORKSHOP_DEF
+
+        return None
+
+    @staticmethod
+    def get_datasource_types():
+        return {d.name: d.value for d in DBType}
+
 
 class CfgDataSourceDB(db.Model):
     # __bind_key__ = 'app_metadata'
@@ -520,15 +577,29 @@ class CfgDataSourceDB(db.Model):
     # host can be None, when we use sqlite3
     host: Mapped[Optional[str]]
     # FIXME: Not sure why we save port as string here. Might need migration
-    port: Mapped[Optional[str]]
+    port: Mapped[Optional[int]]
     dbname: Mapped[str]
     schema: Mapped[Optional[str]]
     username: Mapped[Optional[str]]
     password: Mapped[Optional[str]]
     hashed: Mapped[bool] = mapped_column(default=False)
+
+    # snowflake connections
+    snowflake_role: Mapped[Optional[str]]
+    snowflake_warehouse: Mapped[Optional[str]]
+    # snowflake key-pair authentication
+    snowflake_private_key_file: Mapped[Optional[str]]
+    snowflake_private_key_file_pwd: Mapped[Optional[str]]
+    # snowflake access token
+    snowflake_access_token: Mapped[Optional[str]]
+    snowflake_authentication_type: Mapped[Optional[str]]
+
     use_os_timezone: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[str] = mapped_column(default=get_current_timestamp)
     updated_at: Mapped[str] = mapped_column(default=get_current_timestamp, onupdate=get_current_timestamp)
+
+    # snowflake pull from
+    pull_from: Mapped[Optional[str]]
 
     cfg_data_source: Mapped['CfgDataSource'] = relationship(
         back_populates='db_detail',
@@ -551,6 +622,9 @@ class CfgDataSourceDB(db.Model):
     @classmethod
     def get_by_id(cls, id):
         return cls.query.filter(cls.id == id).first()
+
+    def get_pull_from(self, timezone: Optional[tzinfo]) -> Optional[datetime]:
+        return convert_to_datetime(self.pull_from, timezone)
 
 
 class CfgCsvColumn(db.Model):
@@ -843,10 +917,7 @@ class CfgProcessColumn(db.Model):
             return True
 
         # this is function column, but it created by a chain of mes
-        if self.is_chain_of_me_functions:
-            return True
-
-        return False
+        return bool(self.is_chain_of_me_functions)
 
     @classmethod
     def get_col_main_datetime(cls, proc_id):
@@ -1206,7 +1277,19 @@ class CfgProcess(db.Model):
         return datetime_format.date_format
 
     @classmethod
-    def get_all(cls, is_import: bool = None, with_parent=False, session: scoped_session = None, is_order=True):
+    def get_by_data_source_id(cls, data_source_id, session: scoped_session = None) -> list[Self]:
+        query = session.query(cls) if session else cls.query
+        return query.filter(cls.data_source_id == data_source_id).all()
+
+    @classmethod
+    def get_all(
+        cls,
+        is_import: bool = None,
+        with_parent=False,
+        session: scoped_session = None,
+        is_order=True,
+        data_source_id=None,
+    ):
         query = session.query(cls) if session else cls.query
         if not with_parent:
             query = query.filter(cls.parent_id == null())
@@ -1214,16 +1297,19 @@ class CfgProcess(db.Model):
             query = query.filter(cls.is_import == is_import)
         if is_order:
             query = query.order_by(cls.order)
+        if data_source_id is not None:
+            query = query.filter(cls.data_source_id == data_source_id)
         return query.all()
 
     @classmethod
-    def get_all_ids(cls, is_import: bool = None, with_parent=False, session: scoped_session = None):
-        query = session.query(cls) if session else cls.query
+    def get_all_ids(cls, is_import: bool = None, with_parent=False, session: scoped_session = None) -> list[int]:
+        session = session if session is not None else db.session
+        query = session.query(cls.id)
         if not with_parent:
             query = query.filter(cls.parent_id == null())
         if is_import is not None:
             query = query.filter(cls.is_import == is_import)
-        return query.options(load_only(cls.id)).all()
+        return session.execute(query).scalars().all()
 
     @classmethod
     def get_all_order_by_id(cls):
@@ -1350,19 +1436,18 @@ class CfgProcess(db.Model):
         return check_name_en, check_name_jp, check_name_local
 
     def table_name_for_query_datetime(self):
-        from ap.api.setting_module.services.software_workshop_etl_services import quality_measurements_table
-
-        if self.data_source.type == DBType.SOFTWARE_WORKSHOP.name:
-            return quality_measurements_table.name
-        return self.table_name
+        software_workshop_def = self.data_source.software_workshop_def()
+        if self.master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT.name:
+            return software_workshop_def.quality_measurements
+        elif self.master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY.name:
+            return software_workshop_def.quality_traceabilities
+        else:
+            return self.table_name
 
     def filter_for_query_datetime(self, sql: str) -> str:
-        if self.data_source.type == DBType.SOFTWARE_WORKSHOP.name:
-            from ap.api.setting_module.services.software_workshop_etl_services import quality_measurements_table
-
-            # software workshop import by process must filter by process name here
-            # because this is vertical database
-            return f"{sql} WHERE {quality_measurements_table.c.child_equip_id.name} = '{self.process_factid}'"
+        software_workshop_def = self.data_source.software_workshop_def()
+        if software_workshop_def is not None:
+            return f"{sql} WHERE {software_workshop_def.child_equip_id} = '{self.process_factid}'"
         return sql
 
     def get_main_serial_column(self, is_isolation_object: bool = False):
@@ -1742,10 +1827,7 @@ class CfgTrace(db.Model):
 
         self_trace_key_df = pd.DataFrame(keys, columns=cols)
         other_trace_key_df = pd.DataFrame(other_keys, columns=cols)
-        if not self_trace_key_df.equals(other_trace_key_df):
-            return False
-
-        return True
+        return self_trace_key_df.equals(other_trace_key_df)
 
 
 class CfgFilterDetail(db.Model):
@@ -1778,6 +1860,26 @@ class CfgFilterDetail(db.Model):
 
     def __hash__(self):
         return hash(str(self.id))
+
+    def get_converted_filter_condition(self):
+        """Get normal filter condition if this is a normal column, orthewise, convert it to judge label
+        We might add more conditions to this function later
+        """
+        cfg_column = self.cfg_filter.column
+
+        # normal column
+        if not cfg_column.is_judge:
+            return self.filter_condition
+
+        if self.filter_condition == '0':
+            return cfg_column.judge_negative_display or JudgeDefinition.NG.name
+
+        if self.filter_condition == '1':
+            return cfg_column.judge_positive_display or JudgeDefinition.OK.name
+
+        logger.error(f'Invalid judge filter condition for filter detail: {self.filter_condition}')
+
+        return self.filter_condition
 
 
 class CfgFilter(db.Model):
@@ -1956,7 +2058,7 @@ class DataTraceLog(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     date_time: Mapped[str] = mapped_column(default=get_current_timestamp)
     dataset_id: Mapped[str]
-    event_type: Mapped[str]
+    event_type: Mapped[Optional[str]]
     event_action: Mapped[str]
     target: Mapped[str]
     exe_time: Mapped[int]
@@ -1988,7 +2090,7 @@ class AbnormalTraceLog(db.Model):
     date_time: Mapped[str] = mapped_column(default=get_current_timestamp)
     dataset_id: Mapped[int] = mapped_column(autoincrement=True)
     log_level: Mapped[str] = mapped_column(default=LogLevel.ERROR.value)
-    event_type: Mapped[str]
+    event_type: Mapped[Optional[str]]
     event_action: Mapped[str]
     location: Mapped[str] = mapped_column(default=Location.PYTHON.value)
     return_code: Mapped[str] = mapped_column(default=ReturnCode.UNKNOWN_ERR.value)

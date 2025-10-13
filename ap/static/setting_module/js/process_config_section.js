@@ -672,26 +672,26 @@ class ProcessConfigSection {
                                 <input
                                     type="radio"
                                     class="custom-control-input"
-                                    id="sampleDataRecords"
-                                    name="sampleDataDisplayMode"
+                                    id="sampleDataRecords_${processConfig.id}"
+                                    name="sampleDataDisplayMode_${processConfig.id}"
                                     value="records"
                                     data-observer
                                     onchange="changeSampleDataDisplayMode(this)"
                                     checked="checked"
                                 />
-                                <label class="custom-control-label" for="sampleDataRecords">${i18n.recordsDisplayModeLabel}</label>
+                                <label class="custom-control-label" for="sampleDataRecords_${processConfig.id}">${i18n.recordsDisplayModeLabel}</label>
                             </div>
                             <div class="custom-control custom-radio custom-control-inline">
                                 <input
                                     type="radio"
                                     class="custom-control-input"
-                                    id="sampleDataUnique"
-                                    name="sampleDataDisplayMode"
+                                    id="sampleDataUnique_${processConfig.id}"
+                                    name="sampleDataDisplayMode_${processConfig.id}"
                                     value="unique"
                                     data-observer
                                     onchange="changeSampleDataDisplayMode(this)"
                                 />
-                                <label class="custom-control-label" for="sampleDataUnique"
+                                <label class="custom-control-label" for="sampleDataUnique_${processConfig.id}"
                                     >${i18n.uniqueDisplayModeLabel}</label
                                 >
                             </div>

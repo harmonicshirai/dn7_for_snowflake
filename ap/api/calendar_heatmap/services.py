@@ -199,7 +199,7 @@ def fill_empty_cells(df_cells: pd.DataFrame, dic_df_proc, var_agg_col=None):
     """Some cells don't have data -> need to fill"""
     for proc_id, proc_data in dic_df_proc.items():
         for end_col in proc_data:
-            df_sensor: pd.DataFrame = dic_df_proc[proc_id][end_col].set_index(AGG_COL)
+            df_sensor: pd.DataFrame = proc_data[end_col].set_index(AGG_COL)
             if var_agg_col:
                 dic_df_proc[proc_id][end_col] = {}
 

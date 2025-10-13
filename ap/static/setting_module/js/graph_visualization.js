@@ -145,11 +145,6 @@ const visualModule = (() => {
             }
             const trimActFrom = row.act_from.trim();
             const trimActTo = row.act_to.trim();
-            if (trimActFrom === '' && trimActTo === '') {
-                errorFlg = true;
-                displayMessage(eles.alertMsg, (message = { content: msg.actTimeEmpty, is_error: true }));
-                break;
-            }
 
             if (!isEmpty(trimActFrom) && !isEmpty(trimActTo) && trimActFrom > trimActTo) {
                 errorFlg = true;
@@ -435,7 +430,10 @@ $(() => {
     });
 
     // validate
-    $(visualModule.eles.visualConfigRegister).click(() => {
+    $(visualModule.eles.visualConfigRegister).click((e) => {
+        const isDisabled = $(e.currentTarget).hasClass('disabled');
+        // disable since is_authorized = false
+        if (isDisabled) return;
         if (visualModule.validate() === false) return;
         visualModule.eles.modalId.modal('show');
     });

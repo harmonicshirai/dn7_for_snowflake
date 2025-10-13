@@ -15,9 +15,20 @@ echo  Analysis Platform + DN7
 echo ________________________________________________________________
 echo:
 
+: set variables
+set path_file=.\path_list_ini.log
+set original_path_file=.\_original_path_list.log
+set path_diff_file=.\path_diff.log
+set status_file=.\__STATUS__
+set temp_file=.\__TEMP__
+set version_file=.\VERSION
+set start_up_ini_file=.\startup.ini
+set start_ap_file=.\AnalysisPlatform.bat
+set start_up_file=.\startup.yaml
+
 : get user settings
 echo Read User Settings
-for /f "tokens=1,* delims== eol=;" %%a in (startup.ini) do (
+for /f "tokens=1,* delims== eol=;" %%a in (%start_up_ini_file%) do (
   rem if "%%b" == "" (echo Section: %%a) else set "%%a=%%b"
   if not "%%b" == "" set "%%a=%%b"
 )
@@ -36,23 +47,21 @@ if %startup_mode% == 0 (
 : Make path list and verify application files
 :MAKE_PATH_LIST
 :: Path list init
-set path_file=path_list_ini.log
-set original_path_file=_original_path_list.log
-set path_diff_file=path_diff.log
+
 set path_list_verifying=1
 
 echo Path List Verifying
 rem call :checkFileExist instance\app.sqlite3
-call :checkFileExist startup.yaml
-call :checkFileExist __STATUS__
+call :checkFileExist %start_up_file%
+call :checkFileExist %status_file%
 if %path_list_verifying% equ 0 (
   echo   Failed to create path list because it is not in the initial state.
   echo   Skipped path list verifying!
 ) else (
-  powershell -ExecutionPolicy Bypass -Command "Get-ChildItem -Recurse . -file | Resolve-Path -Relative | Where-Object { $_ -notmatch '__pycache__|.data$|.log$|cache|webassets-cache|.idea' } | Out-File -Encoding ASCII %path_file%"
+  powershell -ExecutionPolicy Bypass -Command "Get-ChildItem -Recurse . -file | Resolve-Path -Relative | Where-Object { $_ -notmatch '__pycache__|.data$|.log$|cache|webassets-cache|.idea' } | Out-File -Encoding ASCII '%path_file%'"
   echo   Created path list Successfully.
   echo.
-  powershell -ExecutionPolicy Bypass -Command "Compare-Object (Get-Content '%path_file%') (Get-Content '%original_path_file%') | Where-Object SideIndicator -eq '=>' | Out-File -Encoding ASCII .\%path_diff_file%"
+  powershell -ExecutionPolicy Bypass -Command "Compare-Object (Get-Content '%path_file%') (Get-Content '%original_path_file%') | Where-Object SideIndicator -eq '=>' | Out-File -Encoding ASCII '%path_diff_file%'"
   for /f %%a in ('powershell -ExecutionPolicy Bypass -Command "(Get-Content '%path_diff_file%').Count"') do (
     if %%a gtr 0 (
       echo   Some files are missing, please re-download the application and try again
@@ -69,14 +78,11 @@ echo.
 : get status install or run AP (should be link in AnalysisPlatform.bat)
 set status_install=0
 set status_run_app=1
-set file_status=__STATUS__
-set file_temp=__TEMP__
-set file_ver=VERSION
-if not exist %file_status% echo:> %file_status%
-cd> %file_temp%
-for %%a in (%file_ver%) do echo %%~ta>> %file_temp%
+if not exist %status_file% echo:> %status_file%
+cd> %temp_file%
+for %%a in (%version_file%) do echo %%~ta>> %temp_file%
 set last_status=%errorlevel%
-fc %file_temp% %file_status% > nul
+fc %temp_file% %status_file% > nul
 if errorlevel 1 (
   set status=%status_install%
   echo Install...
@@ -100,12 +106,12 @@ if %only_install% == 1 (
 : launch AP Batch
 set subt=%subt: =_%
 if %startup_mode% == 1 (
-  start /min AnalysisPlatform.bat
+  start /min %start_ap_file%
 ) else if %startup_mode% == 9 (
-  start /b AnalysisPlatform.bat ^> cmd.log ^2^>^&^1
+  start /b %start_ap_file% ^> cmd.log ^2^>^&^1
 ) else (
   echo Launch Analysis Platform
-  start /b AnalysisPlatform.bat
+  start /b %start_ap_file%
 )
 
 timeout 3

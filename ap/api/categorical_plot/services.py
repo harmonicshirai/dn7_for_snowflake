@@ -8,6 +8,7 @@ import pandas as pd
 from dateutil import tz
 from pandas import DataFrame
 
+from ap import is_internal_version
 from ap.api.common.services.show_graph_services import (
     calc_raw_common_scale_y,
     calc_scale_info,
@@ -1137,7 +1138,7 @@ def dump_img_files(df, graph_param, dic_proc_cfgs):
     if use_etl_spray_shape(dic_proc_cfgs[graph_param.common.start_proc]):
         # make input tsv file
         tsv_file = save_input_data_to_gen_images(df, graph_param)
-        img_files = call_com_view(tsv_file, get_view_path())
+        img_files = call_com_view(tsv_file, get_view_path()) if is_internal_version else []
 
     # strip folder
     if img_files is not None and not isinstance(img_files, Exception):

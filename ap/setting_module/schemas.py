@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Mapping, Optional, TypedDict
 
 import marshmallow
@@ -9,14 +11,20 @@ from marshmallow_sqlalchemy.fields import Nested
 from pydantic.alias_generators import to_camel
 
 from ap import ma
-from ap.common.constants import IS_JUDGE, DataColumnType, DataType, DBType
-from ap.common.cryptography_utils import encrypt
-from ap.common.services.jp_to_romaji_utils import to_romaji
-from ap.detect_judge.core import (
+from ap.common.constants import (
+    IS_JUDGE,
     JUDGE_FORMULA,
     JUDGE_NEGATIVE_DISPLAY,
     JUDGE_POSITIVE_DISPLAY,
     JUDGE_POSITIVE_VALUE,
+    SQL_DAYS_AGO,
+    DataColumnType,
+    DataType,
+    DBType,
+)
+from ap.common.cryptography_utils import encrypt
+from ap.common.services.jp_to_romaji_utils import to_romaji
+from ap.detect_judge.core import (
     JudgeFormula,
 )
 from ap.setting_module.models import (
@@ -40,6 +48,8 @@ from ap.setting_module.models import (
 )
 
 EXCLUDE_COLS = ('updated_at', 'created_at')
+
+logger = logging.getLogger(__name__)
 
 
 class AnyAsBool(fields.Field):
@@ -110,19 +120,102 @@ class DataSourceDbSchema(BaseSchema):
         """
         model = super().make_instance(data)
 
-        # encrypt password
-        model.password = encrypt(model.password)
+        pull_from_req = model.pull_from
+        if pull_from_req is not None:
+            if self._is_valid_date(pull_from_req, '%Y-%m-%d'):
+                dt = datetime.strptime(pull_from_req, '%Y-%m-%d')
+                model.pull_from = datetime(dt.year, dt.month, dt.day).strftime('%Y-%m-%dT00:00:00.000000Z')
+            elif not self._is_valid_date(pull_from_req, '%Y-%m-%dT00:00:00.000000Z'):
+                logger.error(f'pull_from value {pull_from_req} is incorrect format')
+                dt = datetime.now().date() - timedelta(days=SQL_DAYS_AGO)  # Default pull_from value is 30 days ago
+                model.pull_from = datetime(dt.year, dt.month, dt.day).strftime('%Y-%m-%dT00:00:00.000000Z')
+
+        if not model.password:
+            model.password = None
+        if not model.snowflake_access_token:
+            model.snowflake_access_token = None
+        if not model.snowflake_private_key_file_pwd:
+            model.snowflake_private_key_file_pwd = None
+
         model.hashed = True
         # avoid blank string
         model.port = model.port or None
         model.schema = model.schema or None
 
+        if model.id is not None:
+            db: CfgDataSourceDB = CfgDataSourceDB.get_by_id(model.id)
+            # db exists, use existing password in database if user doesn't specify
+            # or use the new password provided by user
+            if model.password is None and db.password:
+                model.password = db.password
+            else:
+                model.password = self._encrypt_password(model.password)
+
+            if model.snowflake_access_token is None and db.snowflake_access_token:
+                model.snowflake_access_token = db.snowflake_access_token
+            else:
+                model.snowflake_access_token = self._encrypt_password(model.snowflake_access_token)
+
+            if model.snowflake_private_key_file_pwd is None and db.snowflake_private_key_file_pwd:
+                model.snowflake_private_key_file_pwd = db.snowflake_private_key_file_pwd
+            else:
+                model.snowflake_private_key_file_pwd = self._encrypt_password(model.snowflake_private_key_file_pwd)
+        else:
+            # new db, use provided password
+            model.password = self._encrypt_password(model.password)
+            model.snowflake_access_token = self._encrypt_password(model.snowflake_access_token)
+            model.snowflake_private_key_file_pwd = self._encrypt_password(model.snowflake_private_key_file_pwd)
+
         return model
+
+    @staticmethod
+    def _encrypt_password(password: str) -> Optional[str]:
+        """Encrypt password, leaving None if the password is empty"""
+        if not password:
+            return None
+        return encrypt(password)
+
+    @staticmethod
+    def _is_valid_date(date_string: str, date_format: str) -> bool:
+        try:
+            datetime.strptime(date_string, date_format)  # str parse to time
+            return True
+        except ValueError:
+            return False
 
 
 class DataSourceDbPublicSchema(DataSourceDbSchema):
     class Meta(DataSourceDbSchema.Meta):
-        exclude = DataSourceDbSchema.Meta.exclude + ('password',)
+        exclude = DataSourceDbSchema.Meta.exclude + (
+            CfgDataSourceDB.password.name,
+            CfgDataSourceDB.snowflake_access_token.name,
+            CfgDataSourceDB.snowflake_private_key_file_pwd.name,
+        )
+
+
+class SWProcessSchema(BaseSchema):
+    """
+    schema for software workshop model
+    It seems like a Process Schema, but with some columns excluded,
+    while certain required columns are defined for validation from the form.
+    """
+
+    class Meta(BaseSchema.Meta):
+        model = CfgProcess
+        exclude = (
+            'visualizations',
+            'traces',
+            'filters',
+            'data_source',
+            'unused_columns',
+        ) + EXCLUDE_COLS  # re-open the params if used
+
+    columns = fields.Nested('ProcessColumnSchema', many=True)
+    id = fields.Integer(allow_none=True)
+    # if create process from sw modal, child_equip_ids is required
+    process_factid = fields.String(allow_none=False, required=True)
+    master_type = fields.String(allow_none=False, required=True)
+    is_import = fields.Boolean(allow_none=True, default=True, required=False)
 
 
 class DataSourceCsvSchema(BaseSchema):
@@ -203,9 +296,6 @@ class ProcessColumnSchema(BaseSchema):
     is_judge = fields.Boolean(dump_only=True)
     is_me_function_column = fields.Boolean(dump_only=True)
     is_chain_of_me_functions = fields.Boolean(dump_only=True)
-    judge_positive_value: fields.String(allow_none=True)
-    judge_positive_display: fields.String(allow_none=True)
-    judge_negative_display: fields.String(allow_none=True)
 
     @post_load
     def make_instance(self, data, **kwargs):
@@ -235,6 +325,27 @@ class ProcessColumnSchema(BaseSchema):
             data[JUDGE_NEGATIVE_DISPLAY] = formula.negative_display
         elif JUDGE_FORMULA in data.keys() and not data[JUDGE_FORMULA] and not data[IS_JUDGE]:
             data.pop(JUDGE_FORMULA)
+        return data
+
+    @pre_load
+    def inherit_parent_properties(self, data, **kwargs):
+        parent_id = data.get('parent_id')
+        if parent_id is not None:
+            parent_column = CfgProcessColumn.get_by_id(parent_id)
+            for column_property in [
+                CfgProcessColumn.data_type.name,
+                CfgProcessColumn.column_type.name,
+                CfgProcessColumn.raw_data_type.name,
+                CfgProcessColumn.is_serial_no.name,
+                CfgProcessColumn.is_get_date.name,
+                CfgProcessColumn.is_auto_increment.name,
+                CfgProcessColumn.is_file_name.name,
+                CfgProcessColumn.unit.name,
+                CfgProcessColumn.judge_positive_value.name,
+                CfgProcessColumn.judge_positive_display.name,
+                CfgProcessColumn.judge_negative_display.name,
+            ]:
+                data[column_property] = getattr(parent_column, column_property)
         return data
 
     @pre_dump

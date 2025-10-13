@@ -4,7 +4,7 @@ import unicodedata
 import pandas as pd
 from pandas import DataFrame, Series
 
-from ap.common.constants import ENCODING_ASCII
+from ap.common.constants import EMPTY_STRING, ENCODING_ASCII
 from ap.common.logger import log_execution_time
 from ap.common.services.data_type import convert_df_str_to_others
 
@@ -21,6 +21,23 @@ DIC_IGNORE_NORMALIZATION = {
     'cfg_data_source_db': ['host', 'dbname', 'schema', 'username', 'password'],
     'cfg_process_column': ['column_raw_name'],
 }
+
+# convert postal mark in string to `post`, done before normalize_str
+# this is because normalize_str replaces with T
+POSTAL_RE = re.compile(r'[\u3012\u3020\u3036]')
+
+# special case for vietnamese: đ letter
+VIETNAMESE_D_RE = re.compile(r'[đĐ]')
+
+# remove space and tab
+SYMBOLS_RE = re.compile(r'[\s\t\+\*…・:;!\?\$\&\"\'\`\=\@\#\\\/。、\.,~\|]')
+
+# replace multi-spaces
+MULTI_SPACES_RE = re.compile(r'\s+')
+
+# `[μµ]` in `English Name` should be replaced in to `u`.
+# convert u before kakasi applied to keep u instead of M
+GREEK_U_RE = re.compile(r'[μµ]')
 
 
 def convert_irregular(char):
@@ -55,7 +72,7 @@ def unicode_normalize(text, convert_irregular_chars=True, normalize_form=NORMALI
     # normalize (also replace Full Space to Half Space)
     text = unicodedata.normalize(normalize_form, text)
     # replace multi-spaces
-    text = re.sub(r'\s+', HAN_SPACE, text)
+    text = MULTI_SPACES_RE.sub(HAN_SPACE, text)
     # trim space
     text = text.strip()
     # replace ℃
@@ -79,11 +96,11 @@ def normalize_preprocessing(input_str):
     normalized_input = input_str
     # convert postal mark in string to `post`, done before normalize_str
     # this is because normalize_str replaces with T
-    normalized_input = re.sub(r'[\u3012\u3020\u3036]', 'post', normalized_input)
+    normalized_input = POSTAL_RE.sub('post', normalized_input)
     # special case for vietnamese: đ letter
-    normalized_input = re.sub(r'[đĐ]', 'd', normalized_input)
+    normalized_input = VIETNAMESE_D_RE.sub('d', normalized_input)
     # remove space and tab
-    normalized_input = re.sub(r'[\s\t\+\*…・:;!\?\$\&\"\'\`\=\@\#\\\/。、\.,~\|]', '', normalized_input)
+    normalized_input = SYMBOLS_RE.sub(EMPTY_STRING, normalized_input)
     return normalized_input
 
 
@@ -98,7 +115,7 @@ def remove_non_ascii_chars(string, convert_irregular_chars=True):
     # TODO: Can this go to normalize_preprocessing as well?
     # `[μµ]` in `English Name` should be replaced in to `u`.
     # convert u before kakasi applied to keep u instead of M
-    normalized_input = re.sub(r'[μµ]', 'uu', normalized_input)
+    normalized_input = GREEK_U_RE.sub('uu', normalized_input)
 
     # normalize with NFKD
     normalized_input = normalize_str(
@@ -184,10 +201,7 @@ def normalize_big_rows(rows, headers=None, strip_quote=True, return_dataframe=Tr
 
 
 def is_ignore_column(table_name, column_name):
-    if column_name in DIC_IGNORE_NORMALIZATION.get(table_name, []):
-        return True
-
-    return False
+    return column_name in DIC_IGNORE_NORMALIZATION.get(table_name, [])
 
 
 def model_normalize(target):

@@ -6,19 +6,19 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.orm import scoped_session
 
+from ap.api.setting_module.services.data_import import DbConnectionParam
 from ap.api.setting_module.services.software_workshop_etl_services import (
-    child_equips_table,
-    get_processes_stmt,
+    FACTORY_LINE_GROUP_LABEL,
 )
 from ap.api.setting_module.services.v2_etl_services import save_unused_columns
 from ap.common.constants import (
-    TABLE_PROCESS_NAME,
     UNDER_SCORE,
     DBType,
     MasterDBType,
 )
 from ap.common.memoize import CustomCache
 from ap.common.pydn.dblib.db_proxy import DbProxy, gen_data_source_of_universal_db
+from ap.common.pydn.dblib.db_proxy_read_only import ReadOnlyDbProxy
 from ap.common.services.jp_to_romaji_utils import to_romaji
 from ap.common.services.normalization import normalize_list
 from ap.equations.utils import get_all_functions_info
@@ -137,6 +137,7 @@ def create_or_update_process_cfg(
         child_process.name_jp = process.name_jp
         child_process.name_en = process.name_en
         child_process.name_local = process.name_local
+        child_process.is_import = process.is_import
 
     # update order if new
     if process.order is None:
@@ -177,13 +178,13 @@ def query_database_tables(db_id, process=None):
         return output
 
     updated_at = data_source.db_detail.updated_at
-    if data_source.type == DBType.SOFTWARE_WORKSHOP.name:
-        tables, process_fact_ids, master_types = get_list_process_software_workshop(data_source.id)
+    if data_source.type in [DBType.POSTGRES_SOFTWARE_WORKSHOP.name, DBType.SNOWFLAKE_SOFTWARE_WORKSHOP.name]:
+        tables, process_fact_ids, master_types = get_list_process_software_workshop(data_source)
         output['tables'] = tables
         output['process_factids'] = process_fact_ids
         output['master_types'] = master_types
     else:
-        output['tables'] = get_list_tables_and_views(data_source.id, updated_at)
+        output['tables'] = get_list_tables_and_views(data_source, updated_at)
 
     return output
 
@@ -222,10 +223,10 @@ def query_database_tables_core(data_source: CfgDataSource, table_prefix):
 
 
 @CustomCache.memoize(duration=300)
-def get_list_tables_and_views(data_source_id: int, updated_at=None):
+def get_list_tables_and_views(data_source, updated_at=None):
     # updated_at only for cache
     logger.info(f'database config updated_at: {updated_at} so cache can not be used')
-    with DbProxy(data_source_id) as db_instance:
+    with ReadOnlyDbProxy(data_source) as db_instance:
         tables = db_instance.list_tables_and_views()
 
     tables = sorted(tables, key=lambda v: v.lower())
@@ -233,28 +234,28 @@ def get_list_tables_and_views(data_source_id: int, updated_at=None):
 
 
 @CustomCache.memoize(duration=300)
-def get_list_process_software_workshop(data_source_id, updated_at=None):
+def get_list_process_software_workshop(data_source: CfgDataSource, updated_at=None):
     # updated_at only for cache
     logger.info(f'database config updated_at: {updated_at} so cache can not be used')
-    with DbProxy(data_source_id) as db_instance:
-        stmt = get_processes_stmt(limit=None)
-        sql, params = db_instance.gen_sql_and_params(stmt)
-        cols, rows = db_instance.run_sql(sql, params=params)
+    with ReadOnlyDbProxy(data_source) as db_instance:
+        software_workshop_def = data_source.software_workshop_def()
+        sql = software_workshop_def.get_processes_query()
+        cols, rows = db_instance.run_sql(sql)
 
-    df_measurement = pd.DataFrame(rows)
+    df_measurement = pd.DataFrame(rows, columns=cols)
     df_measurement['data_type'] = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT.get_data_type()
     df_measurement['master_type'] = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT.name
-    df_history = pd.DataFrame(rows)
+    df_history = pd.DataFrame(rows, columns=cols)
     df_history['data_type'] = MasterDBType.SOFTWARE_WORKSHOP_HISTORY.get_data_type()
     df_history['master_type'] = MasterDBType.SOFTWARE_WORKSHOP_HISTORY.name
     df = pd.concat([df_measurement, df_history]).sort_values(
-        by=[child_equips_table.c.child_equip_id.name, 'data_type'],
+        by=[software_workshop_def.child_equip_id, 'data_type'],
         ascending=[True, False],
     )
 
-    process_fact_ids = df[child_equips_table.c.child_equip_id.name].to_list()
+    process_fact_ids = df[software_workshop_def.child_equip_id].to_list()
     master_types = df['master_type'].to_list()
-    table_names = (df[TABLE_PROCESS_NAME] + UNDER_SCORE + df['data_type']).to_list()
+    table_names = (df[software_workshop_def.table_name] + UNDER_SCORE + df['data_type']).to_list()
     table_names = normalize_list(table_names)
 
     return table_names, process_fact_ids, master_types
@@ -280,7 +281,7 @@ def get_ct_range(proc_id, columns):
         return []
 
     try:
-        with DbProxy(gen_data_source_of_universal_db(proc_id), True) as db_instance:
+        with DbProxy(gen_data_source_of_universal_db(proc_id)) as db_instance:
             trans_data = TransactionData(proc_id)
             ct_range = trans_data.get_ct_range(db_instance)
         # cycle_cls = find_cycle_class(proc_id)
@@ -301,3 +302,40 @@ def get_ct_range(proc_id, columns):
 def update_is_import_column(process_id, is_import):
     with make_session() as meta_session:
         CfgProcess.update_is_import(meta_session, process_id, is_import)
+
+
+@CustomCache.memoize(duration=300)
+def get_processes_by_line_grp(data_source: CfgDataSource, updated_at=None):
+    # updated_at only for cache
+    software_workshop_def = data_source.software_workshop_def()
+    logger.info(f'database config updated_at: {updated_at} so cache can not be used')
+    with ReadOnlyDbProxy(data_source) as db_instance:
+        sql = software_workshop_def.get_processes_by_line_groups_query()
+        _, rows = db_instance.run_sql(sql)
+
+    df_measurement = pd.DataFrame(rows)
+    rename_cols = {col: col.lower() for col in df_measurement.columns}
+    df_measurement['data_type'] = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT.get_data_type()
+    df_measurement['master_type'] = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT.name
+    df_history = pd.DataFrame(rows)
+    df_history['data_type'] = MasterDBType.SOFTWARE_WORKSHOP_HISTORY.get_data_type()
+    df_history['master_type'] = MasterDBType.SOFTWARE_WORKSHOP_HISTORY.name
+    df = pd.concat([df_measurement, df_history])
+    df = df.rename(columns=rename_cols)
+    line_groups = []
+    line_group_infos = []
+    for line_group, group_df in df.groupby(FACTORY_LINE_GROUP_LABEL):
+        line_groups.append(line_group)
+        line_group_infos.append(group_df.to_dict(orient='records'))
+
+    return line_groups, line_group_infos
+
+
+def get_line_grp_info(db_connection_params: DbConnectionParam):
+    output = {'line_groups': [], 'line_group_infos': []}
+    data_source = db_connection_params.data_source_no_id()
+    line_groups, line_group_infos = get_processes_by_line_grp(data_source, updated_at=None)
+    output['line_groups'] = line_groups
+    output['line_group_infos'] = line_group_infos
+
+    return output

@@ -60,9 +60,11 @@ const buildTimeSeriesSummaryResultsHTML = (
     );
 
     return `
-        <div style="width: 100%">
+        <div style="width: 100%;">
             ${tableTitle}
+            <div style="position: relative">
             ${summaryHtml}
+            </div>
         </div>
     `;
 };

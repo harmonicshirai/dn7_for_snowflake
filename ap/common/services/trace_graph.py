@@ -117,9 +117,9 @@ class TraceGraph:
         end_procs = sorted(nx.descendants(graph, start_proc)) if end_proc is None else [end_proc]
 
         paths = []
-        for end_proc in end_procs:
+        for target in end_procs:
             try:
-                paths.extend(nx.all_simple_paths(graph, source=start_proc, target=end_proc))
+                paths.extend(nx.all_simple_paths(graph, source=start_proc, target=target))
             except nx.NodeNotFound:  # there is no path to end_proc
                 continue
 

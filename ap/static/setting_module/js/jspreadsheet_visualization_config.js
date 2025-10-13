@@ -204,7 +204,7 @@ class SpreadSheetVisualizationConfig {
         ];
         headerSort.forEach((headerName, index) => {
             let tdEle = spreadsheet.getTableHeaderElement(headerName);
-            if ([GraphConfigColumns.control_column_name, GraphConfigColumns.act_from].includes(headerName)) {
+            if ([GraphConfigColumns.control_column_name].includes(headerName)) {
                 tdEle.classList.add('required');
             }
             tdEle.innerHTML = `
@@ -352,7 +352,9 @@ class SpreadSheetVisualizationConfig {
                 initializeDateTimePicker(null, true, $cell);
                 const pickerObject = $element.data('daterangepicker');
                 const $pickerElement = $('div.daterangepicker');
+                const $graphConfigTable = $('div#graphConfigTable');
                 $pickerElement.appendTo($cell);
+                const cellRect = $cell[0].getBoundingClientRect();
                 const nativeMoveFn = pickerObject.move;
                 let calledTime = 0;
                 pickerObject.move = () => {
@@ -360,13 +362,42 @@ class SpreadSheetVisualizationConfig {
                     // Therefore, we must stop calling this function from 3 times and keep position of picker
                     if (calledTime > 1) return;
                     nativeMoveFn.call(pickerObject);
-                    const offset = $pickerElement.offset();
-                    offset.top -= 220;
+                    const offset = {
+                        top: cellRect.bottom + window.scrollY, // Position the datetime picker below the cell in the table
+                        left: cellRect.left + window.scrollX,
+                    };
+                    // Position the date picker above the cell
+                    if (offset.top + $pickerElement.outerHeight() > window.innerHeight + window.scrollY) {
+                        offset.top = cellRect.top + window.scrollY - $pickerElement.outerHeight();
+                    }
+
                     $pickerElement.offset(offset);
                     calledTime += 1;
                     if (calledTime === 2) {
                         // unset left (only set right: 0px - by default) to display date-range-picker in one line
                         $pickerElement.css('left', 'unset');
+
+                        if ($graphConfigTable.scrollLeft() > 0) {
+                            const pickerWidth = $pickerElement.outerWidth(); // Width of the datetime picker
+                            const cellCenter = cellRect.left + cellRect.width / 2; // Center of the cell
+                            const windowRightEdge = window.innerWidth + window.scrollX; // Right edge of the window
+                            const spaceToRight = windowRightEdge - cellCenter; // Available space from cell center to window right edge
+
+                            // Check if half the picker's width fits in the space to the right
+                            if (spaceToRight > pickerWidth / 2) {
+                                // Center the picker under the cell
+                                const leftPosition = cellCenter - pickerWidth / 2;
+                                $pickerElement.css({
+                                    left: `${leftPosition}px`,
+                                    right: 'unset',
+                                });
+                            } else {
+                                // Not enough space, align to right with 10px margin
+                                $pickerElement.css({
+                                    right: '10px',
+                                });
+                            }
+                        }
                         // after the second called, the picker need to be shown fully in table
                         $pickerElement[0].scrollIntoView();
                     }
@@ -658,6 +689,33 @@ class SpreadSheetVisualizationConfig {
                 spreadsheet.loadCSS();
                 // add icon sort
                 spreadsheet.loadHeaderStatus();
+            },
+            /**
+             * Only allow to select cells that are not in the column of delete button.
+             * @param {HTMLDivElement} instance - a jexcel container div element.
+             * @param {number} x1 - x coordinate of the top-left cell.
+             * @param {number} y1 - y coordinate of the top-left cell.
+             * @param {number} x2 - x coordinate of the bottom-right cell.
+             * @param {number} y2 - y coordinate of the bottom-right cell.
+             * @param {*} origin - the origin of the selection.
+             */
+            onselection: (instance, x1, y1, x2, y2, origin) => {
+                let isSelectionValid = true;
+                const checkFn = (x, y, isTopLeftCell) => {
+                    const cell = instance.jexcel.getCellFromCoords(x, y);
+                    if (cell && cell.classList.contains('column-delete-button')) {
+                        x = x + (isTopLeftCell ? 1 : -1);
+                        isSelectionValid = false;
+                    }
+                    return x;
+                };
+
+                x1 = checkFn(x1, y1, true);
+                x2 = checkFn(x2, y2, false);
+                if (!isSelectionValid && x1 <= x2) {
+                    instance.jexcel.resetSelection();
+                    instance.jexcel.updateSelectionFromCoords(x1, y1, x2, y2, origin);
+                }
             },
         };
 

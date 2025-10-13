@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+import sqlalchemy as sa
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session
@@ -82,9 +83,7 @@ class SessionListener:
     def make_core_events(db: SQLAlchemy, engine: Engine):
         @event.listens_for(engine, 'begin')
         def do_begin(dbapi_conn):
-            # Avoid the database lock issue, not sure if this is the best way to do it.
-            # dbapi_conn.execute(sa.text('BEGIN IMMEDIATE'))
-            ...
+            dbapi_conn.execute(sa.text('PRAGMA foreign_keys=ON'))
 
         @event.listens_for(engine, 'commit')
         def do_expire(dbapi_conn):

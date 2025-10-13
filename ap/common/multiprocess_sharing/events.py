@@ -106,16 +106,9 @@ class EventAddJob(EventBaseFunction):
     @property
     def job_id(self) -> str:
         """Construct job id: `prefix_jobType_processId_suffix"""
-        job_id = self.job_type.name
-
-        if self.process_id is not None:
-            job_id = generate_job_id(job_id, self.process_id)
-        if self.job_id_prefix is not None:
-            job_id = f'{self.job_id_prefix}_{job_id}'
-        if self.job_id_suffix is not None:
-            job_id = f'{job_id}_{self.job_id_suffix}'
-
-        return job_id
+        return generate_job_id(
+            self.job_type, self.process_id, self.job_id_prefix, self.job_id_suffix, self.data_source_id
+        )
 
     @property
     def job_name(self):
@@ -135,12 +128,11 @@ class EventRemoveJobs(BaseModel):
 
     job_types: list[JobType]
     process_id: Optional[Union[str, int]] = None
+    data_source_id: Optional[Union[str, int]] = None
 
 
 class EventRunFunction(EventBaseFunction):
     """Event for running a function, this function is run immediately in thread"""
-
-    ...
 
 
 class EventExpireCache(BaseModel):
@@ -160,8 +152,6 @@ class EventBackgroundAnnounce(BaseModel):
 
 class EventShutDown(BaseModel):
     """Event for shutting down application"""
-
-    ...
 
 
 class EventKillJobs(BaseModel):

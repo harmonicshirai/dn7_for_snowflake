@@ -24,20 +24,20 @@ def remove_job(job_id: str, process_id: Optional[Union[str, int]] = None):
 
 
 @log_execution_time()
-def remove_jobs(job_types: list[JobType], process_id: Optional[int] = None):
+def remove_jobs(job_types: list[JobType], process_id: Optional[int] = None, data_source_id: Optional[int] = None):
     """Remove all interval jobs
 
     :param list[JobType] job_types:
     :param Optional[int] process_id:
     :return: void
     """
-    kill_jobs(job_types, process_id=process_id)
+    kill_jobs(job_types, process_id=process_id, data_source_id=data_source_id)
     for job_type in job_types:
-        job_id = generate_job_id(job_type, process_id)
+        job_id = generate_job_id(job_type=job_type, process_id=process_id, data_source_id=data_source_id)
         remove_job(job_id, process_id=process_id)
 
 
-def kill_jobs(job_types: list[JobType], process_id: Optional[int] = None):
+def kill_jobs(job_types: list[JobType], process_id: Optional[int] = None, data_source_id: Optional[int] = None):
     """Kill all interval jobs by type and process id
 
     :param list[JobType] job_types:
@@ -47,7 +47,7 @@ def kill_jobs(job_types: list[JobType], process_id: Optional[int] = None):
     running_jobs = RunningJobs.get_running_jobs()
     with RunningJobs.lock():
         for job_type in job_types:
-            job_id = generate_job_id(job_type, process_id)
+            job_id = generate_job_id(job_type=job_type, process_id=process_id, data_source_id=data_source_id)
             running_job: Optional[RunningJob] = running_jobs.get(job_id)
             if running_job:
                 running_job.update(wait_to_kill=True, running_jobs=running_jobs)

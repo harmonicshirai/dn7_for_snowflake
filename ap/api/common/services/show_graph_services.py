@@ -103,6 +103,8 @@ from ap.common.constants import (
     IS_GRAPH_LIMITED,
     IS_PROC_LINKED,
     JUDGE_DATA,
+    JUDGE_NEGATIVE_DISPLAY,
+    JUDGE_POSITIVE_DISPLAY,
     KDE_DATA,
     LAST_REQUEST_TIME,
     LOWER_OUTLIER_IDXS,
@@ -194,7 +196,6 @@ from ap.common.services.statistics import convert_series_to_number, get_mode
 from ap.common.services.trace_graph import ConnectedTraceKeys, TraceGraph
 from ap.common.sigificant_digit import get_fmt_from_array, signify_digit
 from ap.common.trace_data_log import EventAction, Target, save_df_to_file, trace_log
-from ap.detect_judge.core import JUDGE_NEGATIVE_DISPLAY, JUDGE_POSITIVE_DISPLAY
 from ap.equations.utils import get_function_class_by_id
 
 # TODO: filter check
@@ -203,7 +204,6 @@ from ap.setting_module.models import (
     CfgProcessColumn,
     CfgProcessFunctionColumn,
     DataTraceLog,
-    insert_or_update_config,
     make_session,
 )
 from ap.trace_data.schemas import CategoryProc, ConditionProc, DicParam, EndProc
@@ -279,7 +279,7 @@ def gen_dic_data_from_df(
                         dic_data_cat_exp[col_id].append(sql_label_vals[2])
                         dic_data_none_idxs[col_id].append(sql_label_vals[3])
 
-            if len(series_lst):
+            if series_lst:
                 dic_data[proc.proc_id][col_id] = series_lst if cat_exp_mode else series_lst[0]
             else:
                 dic_data[proc.proc_id][col_id] = []
@@ -1073,6 +1073,7 @@ def gen_graph_df(
     boolean_columns,
     duplicate_serial_show=None,
     duplicated_serials_count=None,
+    is_order_by_time=True,
 ):
     res = gen_trace_procs_df(
         start_tm,
@@ -1084,6 +1085,7 @@ def gen_graph_df(
         short_procs,
         duplicate_serial_show,
         duplicated_serials_count,
+        is_order_by_time,
     )
 
     df, actual_record_number, unique_serial = res
@@ -1163,6 +1165,7 @@ def gen_trace_procs_df(
     short_procs,
     duplicate_serial_show: DuplicateSerialShow,
     duplicated_serials_count: DuplicateSerialCount,
+    is_order_by_time: bool,
 ):
     """Use two different ways to get dataframe from database
     The old (legacy) way: calculating using row_numbers, distinct. Drop them by sql.
@@ -1189,8 +1192,8 @@ def gen_trace_procs_df(
     first_proc_id = list(dic_db_files.keys())[0]
     with DbProxy(
         gen_data_source_of_universal_db(first_proc_id),
-        True,
-        True,
+        # FIXME: remove is universal, this is unnecessary
+        is_universal_db=True,
         dic_db_files=dic_db_files,
         proc_id=first_proc_id,
     ) as db_instance:
@@ -1200,7 +1203,8 @@ def gen_trace_procs_df(
             return df, 0, 0
 
         # Sort by time before emitting out df, so the result will be the same with edge server
-        df = df.sort_values(sorted(time_cols))
+        if is_order_by_time:
+            df = df.sort_values(sorted(time_cols))
 
         actual_record_number = len(df)
         unique_record_number = len(df)
@@ -1252,13 +1256,13 @@ def reduce_graph(end_procs, trace_graph: TraceGraph, start_proc_id):
         connected_paths = list(map(trace_graph.remove_middle_nodes, connected_paths))
 
         # backward, only add if there is no paths
-        if not len(connected_paths):
+        if not connected_paths:
             is_trace_forward = False
             connected_paths = trace_graph.get_all_paths(start_proc=end_proc, end_proc=start_proc_id)
             connected_paths = list(map(trace_graph.remove_middle_nodes, connected_paths))
 
         # no forward and backward, fallback to undirected graphs
-        if not len(connected_paths):
+        if not connected_paths:
             is_trace_forward = True
             connected_paths = trace_graph.get_all_paths(
                 start_proc=start_proc_id,
@@ -1407,6 +1411,7 @@ def create_graph_config(cfgs=[]):
                 ACT_TO: None,
                 'type': None,
                 'name': None,
+                'value': None,
             },
         ]
 
@@ -1424,6 +1429,7 @@ def create_graph_config(cfgs=[]):
                 ACT_TO: cfg.act_to,
                 'type': cfg.filter_column.shown_name if cfg.filter_column else None,
                 'name': cfg.filter_detail.name if cfg.filter_detail else None,
+                'value': cfg.filter_detail.filter_condition if cfg.filter_detail else None,
                 'eng_name': cfg.filter_column.name_en if cfg.filter_column else None,  # -> name_en
             },
         )
@@ -1972,7 +1978,7 @@ def get_filter_detail_ids(
         df_col_name = gen_sql_label(cfg_column.id, cfg_column.column_name)
         for cfg_detail in cfg_filter.filter_details:
             if cfg_detail.filter_function == FilterFunc.MATCHES.name:
-                dic_col_filter_details[df_col_name].append((cfg_detail.id, cfg_detail.filter_condition))
+                dic_col_filter_details[df_col_name].append((cfg_detail.id, cfg_detail.get_converted_filter_condition()))
             else:
                 not_exact_matches.append(cfg_detail.id)
 
@@ -2239,8 +2245,7 @@ def calc_raw_common_scale_y(plots, string_col_ids=None, y_col=ARRAY_Y, is_get_co
                     # sum y by pair value
                     sum_y = combined_df.groupby('x')['y'].sum()
                     max_value = sum_y.max()
-                    if max_value > max_common_y_scale_count:
-                        max_common_y_scale_count = max_value
+                    max_common_y_scale_count = max(max_common_y_scale_count, max_value)
                 # calculate and find min_max for none type number - end
             continue
         s = convert_series_to_number(s)
@@ -2596,7 +2601,7 @@ def copy_dic_param_to_thin_dic_param(dic_param, dic_thin_param):
         if key in ignore_keys:
             continue
 
-        dic_thin_param[key] = dic_param[key]
+        dic_thin_param[key] = val
 
     return True
 
@@ -2941,9 +2946,9 @@ def get_serial_and_datetime_data(df, graph_param, dic_proc_cfgs: Dict[int, CfgPr
     serials = []
     date_times = pd.Series()
     start_proc_name = ''
-    for proc in dic_proc_cfgs:
-        if proc == graph_param.common.start_proc:
-            start_proc = dic_proc_cfgs[proc]
+    for proc_id, proc in dic_proc_cfgs.items():
+        if proc_id == graph_param.common.start_proc:
+            start_proc = proc
             if start_proc:
                 start_proc_name = start_proc.shown_name
                 serial_cols = start_proc.get_serials(column_name_only=False)
@@ -2951,7 +2956,7 @@ def get_serial_and_datetime_data(df, graph_param, dic_proc_cfgs: Dict[int, CfgPr
                 datetime_id = datetime_col.id
                 datetime_label = gen_sql_label(datetime_id, datetime_col.column_name)
                 if datetime_label not in df.columns:
-                    datetime_label = f'time_{proc}'
+                    datetime_label = f'time_{proc_id}'
                 date_times = df[datetime_label]
                 for serial_col in serial_cols:
                     serial_label = gen_sql_label(serial_col.id, serial_col.column_name)
@@ -3177,7 +3182,7 @@ def update_draw_data_trace_log(dataset_id, exe_time):
         for trace in trace_logs:
             if trace.exe_time == 0:
                 trace.exe_time = exe_time
-            insert_or_update_config(meta_session, trace)
+            meta_session.merge(trace)
             meta_session.commit()
 
     return True
@@ -3454,12 +3459,14 @@ def get_df_from_db(
         duplicate_serial_show,
         duplicated_serials_count,
         optional_cache_config=optional_cache_config,
+        is_order_by_time=graph_param.common.is_order_by_time,
     )
 
     # sort by time
     df[TIME_COL] = df[gen_proc_time_label(graph_param.common.start_proc)]
-    time_cols = sorted([col for col in df.columns if str(col).startswith(TIME_COL)])
-    df = df.sort_values(time_cols)
+    if graph_param.common.is_order_by_time:
+        time_cols = sorted([col for col in df.columns if str(col).startswith(TIME_COL)])
+        df = df.sort_values(time_cols)
 
     # check empty
     if df is None or not len(df):
@@ -3537,7 +3544,7 @@ def gen_trace_procs_sqls(path, trace_graph: TraceGraph, start_tm, end_tm, end_pr
     dic_processes = {proc_id: TransactionData(proc_id) for proc_id in path}
     # create table if not exist
     for proc_id, trans_data in dic_processes.items():
-        with DbProxy(gen_data_source_of_universal_db(proc_id), True, immediate_isolation_level=True) as db_instance:
+        with DbProxy(gen_data_source_of_universal_db(proc_id), True) as db_instance:
             trans_data.create_table(db_instance)
 
     if len(short_procs) == 1:
@@ -3646,24 +3653,6 @@ def gen_sensor_time_range(db_instance, temp_table_name):
                 time_ranges.append((from_dt, to_dt))
 
     return time_ranges
-
-
-@log_execution_time()
-def use_legacy_way_to_gen_trace_procs_df(
-    # list_sql_objs: List[List[SqlProcLink]],
-    # cond_procs: List[ConditionProc],
-    duplicate_serial_show: DuplicateSerialShow,
-) -> bool:
-    if duplicate_serial_show in (DuplicateSerialShow.SHOW_FIRST, DuplicateSerialShow.SHOW_LAST):
-        return False
-
-    # cond_proc_ids = {proc.proc_id for proc in cond_procs}
-    # for sql_objs in list_sql_objs:
-    #     for sql_obj in sql_objs:
-    #         if sql_obj.process_id in cond_proc_ids:
-    #             return True
-
-    return True
 
 
 @log_execution_time()

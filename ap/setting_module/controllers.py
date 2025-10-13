@@ -1,27 +1,28 @@
 import os
 from json import dumps, loads
 
-from flask import Blueprint, render_template
+from flask import Blueprint, current_app, render_template, request
 from flask_babel import get_locale
 from flask_babel import gettext as _
 
+from ap import is_admin_request, is_internal_version
 from ap.common.common_utils import (
     sort_processes_by_parent_children_relationship,
 )
-from ap.common.constants import DEFAULT_POLLING_FREQ, CfgConstantType
+from ap.common.constants import DISABLE_CONFIG_FROM_EXTERNAL_KEY
 from ap.common.path_utils import (
     get_about_md_file,
     get_cookie_policy_md_file,
     get_data_path,
     get_error_trace_path,
-    get_files,
+    get_etl_scripts,
     get_log_path,
     get_terms_of_use_md_file,
     get_user_scripts_path,
     get_wrapr_path,
 )
 from ap.common.services.jp_to_romaji_utils import to_romaji
-from ap.setting_module.models import CfgConstant, CfgDataSource
+from ap.setting_module.models import CfgDataSource
 from ap.setting_module.schemas import DataSourcePublicSchema
 from ap.setting_module.services.about import markdown_to_html
 from ap.setting_module.services.process_config import (
@@ -53,45 +54,30 @@ def config_screen():
     data_source_list = loads(dump_data)
     import_err_dir = get_error_trace_path().replace('\\', '/')
 
-    # get polling frequency
-    polling_frequency = CfgConstant.get_value_by_type_first(CfgConstantType.POLLING_FREQUENCY.name)
-    if polling_frequency is None:
-        # set default polling freq.
-        polling_frequency = DEFAULT_POLLING_FREQ
-        CfgConstant.create_or_update_by_type(
-            const_type=CfgConstantType.POLLING_FREQUENCY.name,
-            const_value=polling_frequency,
-        )
-
     all_procs = get_all_process()
     all_functions = get_all_functions()
+    datasource_types = CfgDataSource.get_datasource_types()
 
     output_dict = {
         'page_title': _('Application Configuration'),
         'procs': sort_processes_by_parent_children_relationship(all_procs),
         'import_err_dir': import_err_dir,
-        'polling_frequency': int(polling_frequency),
         'data_sources': data_source_list,
         'all_datasource': dumps(all_datasource),
         'log_path': get_log_path(),
         'data_path': get_data_path(),
         'all_function': dumps(all_functions),
         # 'ds_tables': ds_tables
+        'is_authorized': current_app.config.get(DISABLE_CONFIG_FROM_EXTERNAL_KEY) is False or is_admin_request(request),
+        'datasource_types': datasource_types,
     }
 
     # get R ETL wrap functions
     py_etl_path = os.path.join(get_user_scripts_path(), 'py')  # py etl folder path
     r_etl_path = os.path.join(get_wrapr_path(), 'func', 'etl')  # r etl folder path
 
-    # todo: refactor. this is a borderline treasonous use of exceptions
-    try:
-        r_etl_scripts = get_files(directory=r_etl_path, depth_from=1, depth_to=1, file_name_only=True) or []
-    except Exception:
-        r_etl_scripts = []
-    try:
-        py_etl_scripts = get_files(directory=py_etl_path, depth_from=1, depth_to=1, file_name_only=True) or []
-    except Exception:
-        py_etl_scripts = []
+    r_etl_scripts = get_etl_scripts(r_etl_path) if is_internal_version else []
+    py_etl_scripts = get_etl_scripts(py_etl_path)
 
     etl_scripts = r_etl_scripts + py_etl_scripts
     output_dict.update({'etl_scripts': etl_scripts})
@@ -102,6 +88,7 @@ def config_screen():
 
 @setting_module_blueprint.route('/config/filter')
 def filter_config():
+    is_authorized = current_app.config.get(DISABLE_CONFIG_FROM_EXTERNAL_KEY) is False or is_admin_request(request)
     processes = get_all_process_no_nested(with_parent=False)
     # generate english name for process
     for proc_data in processes:
@@ -109,6 +96,7 @@ def filter_config():
             proc_data['name_en'] = to_romaji(proc_data['name'])
     output_dict = {
         'procs': processes,
+        'is_authorized': is_authorized,
     }
     return render_template('filter_config.html', **output_dict)
 
@@ -161,6 +149,7 @@ def term_of_use():
 
 @setting_module_blueprint.route('/config/master')
 def master_config():
+    is_authorized = current_app.config.get(DISABLE_CONFIG_FROM_EXTERNAL_KEY) is False or is_admin_request(request)
     processes = get_all_process_no_nested(with_parent=False)
     # generate english name for process
     for proc_data in processes:
@@ -168,6 +157,7 @@ def master_config():
             proc_data['name_en'] = to_romaji(proc_data['name'])
     output_dict = {
         'procs': processes,
+        'is_authorized': is_authorized,
     }
     return render_template('master_cfg.html', **output_dict)
 

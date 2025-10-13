@@ -627,7 +627,7 @@ const initVisData = (processesArray) => {
     const temp_processes = {}; // wait for get all processes while trace_config_api is running
     for (const key in processesArray) {
         const procCopy = { ...processesArray[key] };
-        procCopy.font = { multi: 'html' };
+        procCopy.font = { multi: false };
         nodes.add(procCopy);
 
         const trace = procCopy.traces;
@@ -646,7 +646,7 @@ const initVisData = (processesArray) => {
             to: trace.target_process_id,
             arrows: 'to',
             font: {
-                multi: 'html',
+                multi: false,
                 strokeColor: COLOR.background,
                 align: 'top',
             },
@@ -1151,6 +1151,12 @@ const syncVisData = (procs = []) => {
 
 const updateProcessEditModal = (procs = []) => {
     tracingElements.edgeBackProc.empty();
+    tracingElements.edgeForwardProc.empty();
+
+    if (!_.size(procs)) {
+        return;
+    }
+
     procs.map((proc) => {
         const option = new Option(proc.shown_name, proc.id, false, false);
         if (proc.name_en) {
@@ -1158,8 +1164,6 @@ const updateProcessEditModal = (procs = []) => {
         }
         tracingElements.edgeBackProc.append(option).trigger('change');
     });
-
-    tracingElements.edgeForwardProc.empty();
     procs.map((proc) => {
         const option = new Option(proc.shown_name, proc.id, false, false);
         if (proc.name_en) {
@@ -1346,8 +1350,8 @@ const updateEdgeInfo = (predictionEdges, isPredictive = false) => {
                         strokeWidth: 0,
                     },
                     label: `<b>${linkCount}</b>`,
-                    from: procStart,
-                    to: procEnd,
+                    from: parseInt(procStart),
+                    to: parseInt(procEnd),
                     title,
                 });
             }
@@ -1483,13 +1487,13 @@ const getEdgeFromUI = () => {
     const edgeData = currentEditEdge;
     const startProc = tracingElements.edgeBackProc.val();
     const endProc = tracingElements.edgeForwardProc.val();
-    edgeData.from = startProc;
-    edgeData.to = endProc;
+    edgeData.from = parseInt(startProc);
+    edgeData.to = parseInt(endProc);
     edgeData.arrows = 'to';
 
     // get Trace Target Data from modal
     const targetProcId = $('select[name="edgeForwardProc"]').val();
-    edgeData.target_proc = targetProcId;
+    edgeData.target_proc = parseInt(targetProcId);
     const targetCols = [];
     const targetOrgCols = [];
     const targetSubStrs = [];
@@ -1500,8 +1504,8 @@ const getEdgeFromUI = () => {
             const colElement = $(this).find('select[name=forwardCol]');
             const colAlias = $('option:selected', colElement).attr('alias');
             const colOrg = $('option:selected', colElement).attr('original');
-            if (!isEmpty(colAlias)) targetCols.push(colAlias);
-            if (!isEmpty(colOrg)) targetOrgCols.push(colOrg);
+            if (!isEmpty(colAlias)) targetCols.push(parseInt(colAlias));
+            if (!isEmpty(colOrg)) targetOrgCols.push(parseInt(colOrg));
 
             if (isOptionDateTime === 0) {
                 targetSubStrs.push(getMatchingDigits($(this)));
@@ -1515,7 +1519,7 @@ const getEdgeFromUI = () => {
 
     // get Trace Self Data from modal
     const selfProcId = $('select[name="edgeBackProc"]').val();
-    edgeData.self_proc = selfProcId;
+    edgeData.self_proc = parseInt(selfProcId);
     const selfCols = [];
     const selfOrgCols = [];
     const selfSubStrs = [];
@@ -1529,8 +1533,8 @@ const getEdgeFromUI = () => {
             const colAlias = $('option:selected', colElement).attr('alias');
             const colOrg = $('option:selected', colElement).attr('original');
             const columnType = $('option:selected', colElement).attr('column-type');
-            if (!isEmpty(colAlias)) selfCols.push(colAlias);
-            if (!isEmpty(colOrg)) selfOrgCols.push(colOrg);
+            if (!isEmpty(colAlias)) selfCols.push(parseInt(colAlias));
+            if (!isEmpty(colOrg)) selfOrgCols.push(parseInt(colOrg));
             if (!isEmpty(columnType)) selfColumnTypes.push(columnType);
 
             if (isOptionDateTime === 0) {
@@ -1550,6 +1554,11 @@ const getEdgeFromUI = () => {
     edgeData.self_substr = selfSubStrs;
     edgeData.delta_time = deltaTimes;
     edgeData.cut_off = cutOffs;
+    edgeData.font = {
+        multi: false,
+        strokeColor: COLOR.background,
+        align: 'top',
+    };
     return edgeData;
 };
 

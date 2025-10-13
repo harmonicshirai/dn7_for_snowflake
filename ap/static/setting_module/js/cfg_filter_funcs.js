@@ -101,18 +101,28 @@ const filterCfgGenerator = (cardId, filterType = filterTypes.OTHER) => {
         return 0;
     };
 
-    const genSelectValueOptions = (filterCondition, select2Type, filterColumnData) => {
+    const genSelectValueOptions = (filterCondition, select2Type, filterColumnData, judge) => {
         const selectedValues = select2Type === 2 ? `${filterCondition}`.split(/[ ]+/) : [filterCondition]; // TODO split into 2 cases
         const selectedValueOptions = [];
         for (const val of selectedValues) {
             if (!isEmpty(val)) {
-                selectedValueOptions.push(`<option value="${val}">${val}</option>`);
+                if (judge.isJudge) {
+                    const displayVal = val.toString() === '1' ? judge.positiveDisplay : judge.negativeDisplay;
+                    selectedValueOptions.push(`<option value="${val}">${displayVal}</option>`);
+                } else {
+                    selectedValueOptions.push(`<option value="${val}">${val}</option>`);
+                }
             }
         }
         const filterValueOptions = [];
         for (const val of filterColumnData) {
             if (!selectedValues.includes(`${val}`)) {
-                filterValueOptions.push(`<option value="${val}">${val}</option>`);
+                if (judge.isJudge) {
+                    const displayVal = val ? judge.positiveDisplay : judge.negativeDisplay;
+                    filterValueOptions.push(`<option value="${val}">${displayVal}</option>`);
+                } else {
+                    filterValueOptions.push(`<option value="${val}">${val}</option>`);
+                }
             }
         }
         return [selectedValues, selectedValueOptions, filterValueOptions];
@@ -240,12 +250,14 @@ const filterCfgGenerator = (cardId, filterType = filterTypes.OTHER) => {
         const hideCondSelect2 = select2Type ? '' : 'hidden';
         const selectedColumn = $(eles.columnName).val();
         const filterColumnData = filterStore.getSelectedProcessConfig().getColumnData(selectedColumn);
+        const judge = filterStore.getSelectedProcessConfig().getJudgeData(selectedColumn);
         filterCondition = stringNormalization(filterCondition);
         filterName = stringNormalization(filterName);
         const [selectedValues, selectedValueOptions, filterValueOptions] = genSelectValueOptions(
             filterCondition,
             select2Type,
             filterColumnData,
+            judge,
         );
 
         // build line select options
@@ -358,10 +370,21 @@ const filterCfgGenerator = (cardId, filterType = filterTypes.OTHER) => {
             const procConfig = filterStore.getSelectedProcessConfig();
             await procConfig.updateColDataFromUDB(colId);
             const newColumnData = procConfig.getColumnData(colId);
-            const select2Data = newColumnData.map((val) => ({
-                id: val,
-                text: val,
-            }));
+            const judge = procConfig.getJudgeData(colId);
+            const select2Data = newColumnData.map((val) => {
+                if (judge) {
+                    return {
+                        id: val,
+                        text: val === 1 ? judge.positiveDisplay : judge.negativeDisplay,
+                        value: val,
+                    };
+                }
+                return {
+                    id: val,
+                    value: val,
+                    text: val,
+                };
+            });
             $(eles.filterConditionSelect2).each(function updateOptions() {
                 const condSelect2 = $(this);
                 const formula = condSelect2.closest('tr').find('select[name=filterConditionFormula]').val();
@@ -1478,6 +1501,10 @@ const filterCfgGenerator = (cardId, filterType = filterTypes.OTHER) => {
     const genEvents = () => {
         // register a filter other
         $(eles.registerBtn).click((e) => {
+            const isDisabled = $(e.currentTarget).hasClass('disabled');
+            // disable button since is_authorized = false
+            if (isDisabled) return;
+
             const isValid = validate(e);
             if (!isValid) return;
             $(eles.modalId).modal('show');

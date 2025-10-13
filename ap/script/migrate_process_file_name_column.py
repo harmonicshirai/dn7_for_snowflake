@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, null
+from sqlalchemy import create_engine, null, text
 from sqlalchemy.orm import load_only, Session
 
 from ap.common.common_utils import create_sa_engine_for_migration
@@ -90,20 +90,22 @@ def migrate_cfg_process_column_change_all_generated_datetime_column_type(app_db_
     datetime_generated = 'DatetimeGenerated'
     with engine.connect() as conn:
         session = Session(bind=conn)
-        base_proc = session.query(CfgProcess).options(load_only(CfgProcess.id)).filter_by(parent_id=null()).all()
+        base_proc = session.execute(text(f'SELECT * FROM cfg_process WHERE parent_id IS NULL')).fetchall()
+        base_proc = [proc._asdict() for proc in base_proc]
         for proc in base_proc:
-            proc_column_rows = session.query(CfgProcessColumn).filter_by(process_id=proc.id).all()
-            cols_name = [col.column_name for col in proc_column_rows]
+            proc_column_rows = session.execute(text(f"SELECT * FROM cfg_process_column WHERE process_id = {proc['id']}")).fetchall()
+            proc_column_rows = [row._asdict() for row in proc_column_rows]
+            cols_name = [col['column_name'] for col in proc_column_rows]
             if datetime_generated not in cols_name:
                 continue
             rows_date_time = []
             rows_datetime_generated = []
             for row in proc_column_rows:
-                column_type = row.column_type
-                column_name = row.column_name
+                column_type = row['column_type']
+                column_name = row['column_name']
                 if column_name != datetime_generated and column_type == DataColumnType.DATETIME.value:
                     rows_date_time.append(row)
-                if row.column_name == datetime_generated and column_type != DataColumnType.DATETIME.value:
+                if row['column_name'] == datetime_generated and column_type != DataColumnType.DATETIME.value:
                     rows_datetime_generated.append(row)
             if len(rows_datetime_generated) == 1 and len(rows_date_time) == 0:
                 rows_datetime_generated[-1].column_type = DataColumnType.DATETIME.value

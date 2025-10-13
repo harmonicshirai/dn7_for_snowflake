@@ -178,6 +178,10 @@ def calc_summary_elements(plot):
         if th_high is not None and th_low is not None and sigma:
             cp = (th_high - th_low) / (6 * sigma)
             cpk = min((th_high - average) / sigma_3, (average - th_low) / sigma_3)
+        elif th_high is not None and sigma:
+            cp = (th_high - average) / sigma_3
+        elif th_low is not None and sigma:
+            cp = (average - th_low) / sigma_3
 
         max_input_arr = None
         min_input_arr = None
@@ -379,8 +383,7 @@ def calc_for_neg_ratio(df: pd.DataFrame, column_name: str, total_bin: int = 128)
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f'The following columns not exist in the DataFrame: {", ".join(missing_columns)}')
-    if len(df.index) <= total_bin:
-        total_bin = len(df.index)
+    total_bin = min(len(df.index), total_bin)
     df[NegRatio.BIN.value] = pd.cut(
         df.index,
         bins=total_bin,
@@ -435,8 +438,7 @@ def calc_cumulative_sum(df: pd.DataFrame, max_neg_ratio: float, column_name: str
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f'The following columns not exist in the DataFrame: {", ".join(missing_columns)}')
-    if len(df.index) <= total_bin:
-        total_bin = len(df.index)
+    total_bin = min(len(df.index), total_bin)
 
     df[NegRatio.BIN.value] = pd.cut(
         df.index,

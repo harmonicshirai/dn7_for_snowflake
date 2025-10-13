@@ -86,6 +86,7 @@ class SessionConfigChanges(SessionMeta):
     )
 
     CACHE_CONFIG_KEY = '_cache_config_key'
+    IGNORE_TRIGGER_KEY = '_ignore_trigger_key'
 
     @classmethod
     def begin(cls, session: Session, **kwargs):
@@ -116,7 +117,7 @@ class SessionConfigChanges(SessionMeta):
     @classmethod
     def commit(cls, session: Session):
         changes = cls.changes(session)
-        if changes is None or not changes.has_changes():
+        if changes is None or not changes.has_changes() or cls.is_ignored_trigger(session):
             return
 
         CacheHandler.compute(
@@ -130,3 +131,7 @@ class SessionConfigChanges(SessionMeta):
     @classmethod
     def changes(cls, session: Session) -> Optional[ComputeCacheChanges]:
         return getattr(session, cls.CACHE_CONFIG_KEY, None)
+
+    @classmethod
+    def is_ignored_trigger(cls, session: Session) -> bool:
+        return getattr(session, cls.IGNORE_TRIGGER_KEY, False)

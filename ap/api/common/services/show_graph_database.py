@@ -18,8 +18,7 @@ if TYPE_CHECKING:
 @CustomCache.memoize(cache_type=CacheType.CONFIG_DATA)
 def get_all_process_ids() -> list[int]:
     with make_session() as session:
-        rows = CfgProcess.get_all_ids(with_parent=True, session=session)
-        return [r.id for r in rows]
+        return CfgProcess.get_all_ids(with_parent=True, session=session)
 
 
 @log_execution_time()

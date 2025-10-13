@@ -88,7 +88,7 @@ class DateTimeFormatUtils(object):
 @log_execution_time()
 def convert_datetime_format(
     df,
-    dic_data_type,
+    dic_data_type: dict[str, str],  # {str, DataType.name}
     datetime_format: str | None = None,
     client_timezone: str | None = None,
 ):

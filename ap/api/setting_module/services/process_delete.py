@@ -1,44 +1,15 @@
+import logging
+import os
+import shutil
+
 from ap.common.constants import JobType
 from ap.common.logger import log_execution_time
 from ap.common.multiprocess_sharing import EventQueue, EventRemoveJobs
-from ap.common.path_utils import delete_file, gen_sqlite3_file_name
+from ap.common.path_utils import delete_file, gen_sqlite3_file_name, get_data_path, resource_path
 from ap.setting_module.models import CfgDataSource, CfgProcess, JobManagement, make_session
 from ap.setting_module.services.process_config import update_is_import_column
 
-# @log_execution_time()
-# def delete_process():
-#     """
-#     delete processes
-#     :return:
-#     """
-#     yield 0
-#
-#     missing_procs = get_unused_procs()
-#
-#     if missing_procs:
-#         proc_id = missing_procs[0]
-#         proc = Process.query.get(proc_id)
-#         proc.delete_proc_detail()
-#         db.session.delete(proc)
-#         db.session.commit()
-#
-#     yield 100
-
-
-# @log_execution_time()
-# def add_del_proc_job():
-#     missing_procs = get_unused_procs()
-#
-#     if not missing_procs:
-#         return
-#
-#     scheduler.add_job(
-#         JobType.DEL_PROCESS.name,
-#         delete_process_job,
-#         trigger=DateTrigger(run_date=datetime.now().astimezone(utc), timezone=utc),
-#         replace_existing=True,
-#         kwargs={'_job_id': JobType.DEL_PROCESS.name, '_job_name': JobType.DEL_PROCESS.name},
-#     )
+logger = logging.getLogger(__name__)
 
 
 @log_execution_time()
@@ -50,23 +21,17 @@ def delete_proc_cfg_and_relate_jobs(proc_id):
         deleting_process_ids = [proc.id for proc in deleting_processes]
 
         # stop all jobs before deleting
-        target_jobs = [
-            JobType.CSV_IMPORT,
-            JobType.FACTORY_IMPORT,
-            JobType.FACTORY_PAST_IMPORT,
-            JobType.RESTRUCTURE_INDEXES,
-            JobType.USER_BACKUP_DATABASE,
-            JobType.USER_RESTORE_DATABASE,
-            JobType.UPDATE_TRANSACTION_TABLE,
-        ]
-        for proc_id in deleting_process_ids:
-            EventQueue.put(EventRemoveJobs(job_types=target_jobs, process_id=proc_id))
+        target_jobs = JobType.jobs_include_process_id()
+        for p in deleting_process_ids:
+            EventQueue.put(EventRemoveJobs(job_types=target_jobs, process_id=p))
 
         for cfg_process in deleting_processes:
             meta_session.delete(cfg_process)
 
-    for proc_id in deleting_process_ids:
-        delete_transaction_db_file(proc_id)
+    delete_pulled_data_folders(deleting_process_ids)
+
+    for p in deleting_process_ids:
+        delete_transaction_db_file(p)
 
     return deleting_process_ids
 
@@ -78,27 +43,16 @@ def initialize_proc_config(proc_id):
     # get ids incase sqlalchemy session is dead
     deleting_process_ids = [proc.id for proc in deleting_processes]
     # stop all jobs before deleting
-    target_jobs = [
-        JobType.CSV_IMPORT,
-        JobType.FACTORY_IMPORT,
-        JobType.FACTORY_PAST_IMPORT,
-        JobType.RESTRUCTURE_INDEXES,
-        JobType.USER_BACKUP_DATABASE,
-        JobType.USER_RESTORE_DATABASE,
-        JobType.UPDATE_TRANSACTION_TABLE,
-    ]
+    target_jobs = JobType.jobs_include_process_id()
 
-    for proc_id in deleting_process_ids:
-        EventQueue.put(EventRemoveJobs(job_types=target_jobs, process_id=proc_id))
+    for p in deleting_process_ids:
+        EventQueue.put(EventRemoveJobs(job_types=target_jobs, process_id=p))
 
-    for proc_id in deleting_process_ids:
-        delete_transaction_db_file(proc_id)
-        update_is_import_column(proc_id, is_import=False)
+    delete_pulled_data_folders(deleting_process_ids)
 
-
-# @log_execution_time()
-# def get_unused_procs():
-#     return list({proc.id for proc in Process.get_all_ids()} - {proc.id for proc in CfgProcess.get_all_ids()})
+    for p in deleting_process_ids:
+        delete_transaction_db_file(p)
+        update_is_import_column(p, is_import=False)
 
 
 def del_data_source(ds_id):
@@ -126,6 +80,15 @@ def delete_transaction_db_file(proc_id):
         pass
 
     return True
+
+
+def delete_pulled_data_folders(process_ids: list[int]):
+    data_folder = get_data_path()
+    for process_id in process_ids:
+        folder_path = resource_path(data_folder, str(process_id))
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+            logger.debug('Deleted pulled data folder %s', folder_path)
 
 
 def del_process_data_from_job_management(ds_id):

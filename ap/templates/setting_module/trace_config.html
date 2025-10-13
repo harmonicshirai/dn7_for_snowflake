@@ -52,6 +52,9 @@
                             class="btn btn-primary btn-green"
                             type="button"
                             title="{{ _('Register Trace Config Hover') }}"
+                            {% if not is_authorized %}
+                                disabled
+                            {% endif %}
                         >
                             <i class="far fa-save"></i>
                             {{ _("Register") }}

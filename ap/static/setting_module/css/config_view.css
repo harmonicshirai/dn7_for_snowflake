@@ -518,3 +518,7 @@ input#skipHead.form-control {
     display: flex;
     align-items: baseline;
 }
+
+.modal-snowflake {
+    max-width: 1000px;
+}

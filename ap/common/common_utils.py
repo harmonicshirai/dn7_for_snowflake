@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
+import datetime as dt
 import functools
+import importlib
+import inspect
 import json
 import locale
 import logging
@@ -12,15 +16,18 @@ import shutil
 import socket
 import sys
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from enum import Enum
+from functools import wraps
 from io import IOBase
 from itertools import permutations
-from typing import Any, Type, Union
+from typing import Any, Callable, Generic, Optional, Type, TypeVar, Union
 
 import chardet
 import numpy as np
 import pandas as pd
+import pytz
+import sqlalchemy as sa
 
 # from charset_normalizer import detect
 from dateutil import parser, tz
@@ -31,6 +38,7 @@ from pandas import DataFrame, Series
 from pandas.core.arrays.integer import NUMPY_INT_TO_DTYPE
 from pandas.io import parquet
 from pyarrow import feather
+from pytz import tzinfo
 from sqlalchemy import NullPool, create_engine
 
 from ap.common.constants import (
@@ -74,6 +82,9 @@ from ap.common.services.jp_to_romaji_utils import to_romaji
 from ap.common.services.normalization import normalize_str, unicode_normalize
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+U = TypeVar('U')
 
 
 def get_current_timestamp(format_str=DATE_FORMAT_STR) -> str:
@@ -444,6 +455,76 @@ def chunks(lst, size):
 #         yield {k: data[k] for k in islice(it, size)}
 
 
+def convert_sa_sql_to_sa_str(fn):
+    @wraps(fn)
+    def decorator(self, *args, **kwargs):
+        sig = inspect.signature(fn)
+        param_names = list(sig.parameters.keys())
+        # remove `self`
+        param_names = param_names[1:]
+        for arg_name, arg_value in zip(param_names, args):
+            # to not override original args
+            if arg_name in kwargs:
+                continue
+            kwargs[arg_name] = arg_value
+
+        sql = kwargs['sql']
+        if isinstance(sql, str):
+            return fn(self, **kwargs)
+
+        if isinstance(sql, (sa.GenerativeSelect, sa.TextClause)):
+            if kwargs.get('params') is not None:
+                sql = sql.bindparams(**kwargs['params'])
+            sql, params = self.gen_sql_and_params(sql)
+            kwargs['sql'] = sql
+            kwargs['params'] = params
+        else:
+            raise NotImplementedError
+
+        return fn(self, **kwargs)
+
+    return decorator
+
+
+def handle_read_only(check_sql_statement: bool = True):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if not self.read_only:
+                return fn(self, *args, **kwargs)
+
+            msg = 'Read only connection -> Cannot execute sql make any changes in database !!!'
+            if not check_sql_statement:
+                raise Exception(msg)
+
+            changes_keywords = [
+                'ADD',
+                'ALTER',
+                'CREATE',
+                'REPLACE',
+                'DELETE',
+                'DROP',
+                'EXEC',
+                'PROCEDURE',
+                'SET',
+                'UPDATE',
+                'TRUNCATE',
+            ]
+            pattern = re.compile(rf'(\s|\b)({"|".join(changes_keywords)})\s', re.IGNORECASE)
+            arg_sql = args[0] if 'sql' not in kwargs else kwargs.get('sql')
+            matched = re.match(pattern, arg_sql)
+            if matched:  # in case sql statement contains changes data keywords.
+                raise Exception(msg)
+
+            result = fn(self, *args, **kwargs)
+
+            return result
+
+        return wrapper
+
+    return decorator
+
+
 def strip_all_quote(instr):
     return str(instr).strip("'").strip('"')
 
@@ -465,7 +546,7 @@ def get_csv_delimiter(csv_delimiter):
 
 def sql_regexp(expr, item):
     reg = re.compile(expr, re.I)
-    return reg.search(str(item)) is not None
+    return reg.search(str(item if item is not None else '')) is not None
 
 
 def set_sqlite_params(conn):
@@ -571,9 +652,7 @@ def as_list(param):
 
 
 def is_empty(v):
-    if not v and v != 0:
-        return True
-    return False
+    return bool(not v and v != 0)
 
 
 def detect_file_encoding(file):
@@ -935,6 +1014,10 @@ def gen_import_history_table_name(proc_id: int):
     return f't_import_history_{proc_id}'
 
 
+def gen_pull_history_table_name(proc_id: int):
+    return f't_pull_history_{proc_id}'
+
+
 def gen_bridge_column_name(id, name):
     name = to_romaji(name)
     # clear column name
@@ -1048,17 +1131,15 @@ def is_boolean_dtype(series: Series) -> bool:
     from ap.api.setting_module.services.data_import import ALL_SYMBOLS
 
     unique_values: Series = pd.Series(series.unique()).replace(ALL_SYMBOLS, pd.NA).dropna()
-    if len(unique_values) == 2 and (
-        (
+    return bool(
+        len(unique_values) == 2
+        and (
             is_not_string_series(unique_values).all()
             and is_boolean(unique_values).all()
             and (is_only_type(unique_values, bool) or is_only_integer(unique_values))
-        )
-        or is_string_boolean_series(unique_values).all()
-    ):
-        return True
-
-    return False
+            or is_string_boolean_series(unique_values).all()
+        ),
+    )
 
 
 def is_int_64(data: Series):
@@ -1116,8 +1197,8 @@ def find_duplicate_values(key_value_dict: dict[Any, str]) -> dict[str, Any]:
             duplicate_value_item[value] = (duplicate_value_item.get(value) or []) + [key]
 
     # sort keys by alphabet
-    for key in duplicate_value_item.keys():
-        duplicate_value_item[key].sort()
+    for value in duplicate_value_item.values():
+        value.sort()
 
     return duplicate_value_item
 
@@ -1159,9 +1240,23 @@ def is_none_or_empty(value: Union[str, int, None]) -> bool:
     return value is None or value == EMPTY_STRING
 
 
-def generate_job_id(job_type: Union[JobType, str], process_id: int | None = None) -> str:
-    job = job_type.name if isinstance(job_type, JobType) else job_type
-    return f'{job}_{process_id}' if process_id is not None else f'{job}'
+def generate_job_id(
+    job_type: JobType,
+    process_id: int | None = None,
+    prefix: str | None = None,
+    suffix: str | None = None,
+    data_source_id: int | None = None,
+) -> str:
+    job_id = job_type.name
+    if process_id is not None and job_type in JobType.jobs_include_process_id():
+        job_id = f'{job_id}_{process_id}'
+    elif data_source_id is not None and job_type in JobType.jobs_include_data_source_id():
+        job_id = f'{job_id}_{data_source_id}'
+    if prefix is not None:
+        job_id = f'{prefix}_{job_id}'
+    if suffix is not None:
+        job_id = f'{job_id}_{suffix}'
+    return job_id
 
 
 def create_sa_engine_for_migration(uri):
@@ -1176,3 +1271,320 @@ def convert_eu_decimal_series(data: pd.Series, data_type: DataType):
     elif data_type in [DataType.EU_REAL_SEP.name, DataType.EU_INTEGER_SEP.name]:
         data = data.astype(pd.StringDtype()).str.replace(r'\.+', '', regex=True).str.replace(r'\,+', '.', regex=True)
     return data
+
+
+def to_pydatetime(value: Union[datetime, date, pd.Timestamp]):
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, time=time(0, 0, 0, 0))
+    raise ValueError(f'Invalid value: {value}')
+
+
+def convert_to_datetime(string_time: Optional[str], timezone: Optional[tzinfo] = None) -> Optional[datetime]:
+    if string_time is None:
+        return None
+    # since string_time is UTC formatted (..T..Z)
+    # so need to register/replace tz of datetime as UTC
+    # before convert it to factory tz
+    output = datetime.strptime(string_time, DATE_FORMAT_STR)
+    if timezone is not None:
+        return output.replace(tzinfo=pytz.utc).astimezone(timezone)
+    return output
+
+
+def convert_to_str(value: datetime):
+    if value.tzinfo:
+        value = value.astimezone(pytz.utc)
+    return value.strftime(DATE_FORMAT_STR)
+
+
+def safe_import(module_name):
+    """
+    safe import for r modules
+    """
+    try:
+        return importlib.import_module(module_name)
+    except ImportError:
+        return None
+
+
+class BoundType(Enum):
+    INCLUDED = 'Included'
+    EXCLUDED = 'Excluded'
+    UNBOUNDED = 'Unbounded'
+
+
+class Bound(Generic[T]):
+    """Generic bound type, if user passes None, we infer this as Unbound"""
+
+    def __init__(self, kind: BoundType, value: Optional[T] = None):
+        self.kind = kind if value is not None else BoundType.UNBOUNDED
+        self.value = value
+
+    def map(self, func: Callable[[T], U]) -> Bound[U]:
+        if self.kind is BoundType.UNBOUNDED:
+            return Bound(kind=BoundType.UNBOUNDED)
+        return Bound(self.kind, value=func(self.value))
+
+    def min_bound(self, other: Bound[T]) -> Bound[T]:
+        if self.kind is BoundType.UNBOUNDED or other.kind is BoundType.UNBOUNDED:
+            raise ValueError('Cannot get min for unbounded')
+        if self.kind == other.kind and self.value == other.value:
+            return self
+        if self.value < other.value:
+            return self
+        if self.value > other.value:
+            return other
+        # self != other ===> kind is different
+        return Bound(kind=BoundType.EXCLUDED, value=self.value)
+
+    def max_bound(self, other: Bound[T]) -> Bound[T]:
+        if self.kind is BoundType.UNBOUNDED or other.kind is BoundType.UNBOUNDED:
+            raise ValueError('Cannot get min for unbounded')
+        if self.kind == other.kind and self.value == other.value:
+            return self
+        if self.value > other.value:
+            return self
+        if self.value < other.value:
+            return other
+        # self != other ===> kind is different
+        return Bound(kind=BoundType.EXCLUDED, value=self.value)
+
+    def reverse(self) -> Optional[Bound[T]]:
+        """Reverse a bound:
+        - [x -> x)
+        - (x -> x]
+        - Unbounded -> None
+        """
+        if self.kind is BoundType.INCLUDED:
+            return Bound(BoundType.EXCLUDED, self.value)
+        if self.kind is BoundType.EXCLUDED:
+            return Bound(BoundType.INCLUDED, self.value)
+        return None
+
+    def __repr__(self):
+        if self.kind == BoundType.UNBOUNDED:
+            return 'Unbounded'
+        return f'{self.kind.value}({self.value})'
+
+    def __eq__(self, other: Bound[T]) -> bool:
+        return self.kind == other.kind and self.value == other.value
+
+    def __hash__(self):
+        return hash((self.kind, self.value))
+
+
+@dataclasses.dataclass
+class TimeRangeStr:
+    """Bound in string to support queries in sql (since our sqlite3 do not store datetime in database)"""
+
+    min: Bound[str]
+    max: Bound[str]
+
+
+class TimeRange:
+    """Time range for common querying: Bound(min), Bound(max)"""
+
+    min: Bound[dt.datetime]
+    max: Bound[dt.datetime]
+
+    def __init__(self, min_ts: Any, min_ts_bound_type: BoundType, max_ts: Any, max_ts_bound_type: BoundType):
+        if not min_ts:
+            min_ts = None
+        if not max_ts:
+            max_ts = None
+
+        # trivial case, both min max is None, this is empty datetime
+        if min_ts is None and max_ts is None:
+            # we use a trick here to ensure emptiness e.g: (0, 0) is a empty range
+            self.min = Bound(BoundType.EXCLUDED, dt.datetime.min)
+            self.max = Bound(BoundType.EXCLUDED, dt.datetime.min)
+            return
+
+        min_ts = self._parse_datetime(min_ts) if min_ts is not None else None
+        max_ts = self._parse_datetime(max_ts) if max_ts is not None else None
+        self.min = Bound(min_ts_bound_type, min_ts)
+        self.max = Bound(max_ts_bound_type, max_ts)
+
+    def __eq__(self, other: 'TimeRange') -> bool:
+        if not isinstance(other, TimeRange):
+            return False
+        if self.empty() and other.empty():
+            return True
+        return self.min == other.min and self.max == other.max
+
+    def __hash__(self):
+        return hash((self.min, self.max))
+
+    def __repr__(self) -> str:
+        if self.min.kind is BoundType.INCLUDED:
+            left = f'[{self.min.value}'
+        elif self.min.kind is BoundType.EXCLUDED:
+            left = f'({self.min.value}'
+        else:
+            left = '(-inf'
+
+        if self.max.kind is BoundType.INCLUDED:
+            right = f'{self.max.value}]'
+        elif self.max.kind is BoundType.EXCLUDED:
+            right = f'{self.max.value})'
+        else:
+            right = 'inf)'
+
+        return f'{left};{right}'
+
+    def __str__(self) -> str:
+        return repr(self)
+
+    def empty(self) -> bool:
+        if self.min.kind is BoundType.UNBOUNDED or self.max.kind is BoundType.UNBOUNDED:
+            return False
+
+        if self.min.value > self.max.value:
+            return True
+
+        # (min < max) not empty
+        if self.min.value < self.max.value:
+            return False
+
+        # if min == max, check bound_type
+        # other cases ([a, a), (a, a], (a, a)) are empty
+        return self.min.kind is BoundType.EXCLUDED or self.max.kind is BoundType.EXCLUDED
+
+    def complements(self) -> list['TimeRange']:
+        """The complements of self
+        (-inf, 5] --> (5, inf)
+        (-inf, 5) --> [5, inf)
+        (1, 2) -> (-inf, 1] and [2, inf)
+        """
+
+        if self.empty():
+            raise ValueError(
+                'Cannot support complements on empty range. '
+                'Reason: this cause the complement to be (-inf, inf),'
+                ' but we currently cannot support both empty and (-inf, inf)'
+            )
+
+        # (-inf, x)
+        if self.min.kind is BoundType.UNBOUNDED:
+            reversed_max = self.max.reverse()
+            # [x, inf)
+            return [TimeRange(reversed_max.value, reversed_max.kind, None, BoundType.UNBOUNDED)]
+
+        # (x, inf)
+        if self.max.kind is BoundType.UNBOUNDED:
+            reversed_min = self.min.reverse()
+            # (-inf, x]
+            return [TimeRange(None, BoundType.UNBOUNDED, reversed_min.value, reversed_min.kind)]
+
+        # (a, b)
+        reversed_min = self.min.reverse()
+        reversed_max = self.max.reverse()
+        return [
+            # (-inf, a]
+            TimeRange(None, BoundType.UNBOUNDED, reversed_min.value, reversed_min.kind),
+            # [b, inf)
+            TimeRange(reversed_max.value, reversed_max.kind, None, BoundType.UNBOUNDED),
+        ]
+
+    def different(self, other: 'TimeRange') -> list['TimeRange']:
+        """Find a TimeRanges that exists in self but not in other
+        return None if there is no such range (other contains self)
+
+        other: [1,4]
+        self: [6,10]
+        result: [6,10]
+
+        other: [1, 5)
+        self:  [0, 3)
+        result: [0, 1)
+
+        other: [1, inf)
+        self:  [2, inf)
+        result: None
+
+        other: [1, 2]
+        self: [0, 10]
+        result: [0, 1) and (2, 10]
+
+        other cases...
+        """
+        if self.empty():
+            return []
+        if other.empty():
+            return [self]
+
+        other_complements = other.complements()
+        results = [self.intersect(o) for o in other_complements]
+        return [r for r in results if r is not None]
+
+    def intersect(self, other: 'TimeRange') -> Optional[TimeRange]:
+        """Find the intersected time range between self and other"""
+        if self.empty():
+            return None
+        if other.empty():
+            return None
+
+        if self.min.kind is BoundType.UNBOUNDED and self.max.kind is BoundType.UNBOUNDED:
+            raise ValueError('(-inf, inf) time range is not supported')
+        if other.min.kind is BoundType.UNBOUNDED and other.max.kind is BoundType.UNBOUNDED:
+            raise ValueError('(-inf, inf) time range is not supported')
+
+        if self.max.kind is BoundType.UNBOUNDED:
+            max_bound = other.max
+        elif other.max.kind is BoundType.UNBOUNDED:
+            max_bound = self.max
+        else:
+            max_bound = self.max.min_bound(other.max)
+
+        if self.min.kind is BoundType.UNBOUNDED:
+            min_bound = other.min
+        elif other.min.kind is BoundType.UNBOUNDED:
+            min_bound = self.min
+        else:
+            min_bound = self.min.max_bound(other.min)
+
+        time_range = TimeRange(
+            min_ts=min_bound.value,
+            min_ts_bound_type=min_bound.kind,
+            max_ts=max_bound.value,
+            max_ts_bound_type=max_bound.kind,
+        )
+
+        return None if time_range.empty() else time_range
+
+    def to_time_range_str(self, fmt: str) -> 'TimeRangeStr':
+        return TimeRangeStr(
+            min=self.min.map(lambda m: m.strftime(fmt)),
+            max=self.max.map(lambda m: m.strftime(fmt)),
+        )
+
+    @staticmethod
+    def _parse_datetime(
+        data: Optional[Union[dt.datetime, pd.Timestamp, str, Any]],
+    ) -> Optional[dt.datetime]:
+        if data is None:
+            return data
+        if isinstance(data, dt.datetime):
+            return data
+        if isinstance(data, pd.Timestamp):
+            return data.to_pydatetime()
+        if isinstance(data, str):
+            data = data.strip()
+            if data == EMPTY_STRING:
+                return None
+            return pd.to_datetime(data).to_pydatetime()
+        raise TypeError(f'invalid type input: receive {type(data)}')
+
+    def format(self, fmt: str) -> str:
+        time_range_str = self.to_time_range_str(fmt)
+        if time_range_str.min.kind is BoundType.UNBOUNDED and time_range_str.max.kind is BoundType.UNBOUNDED:
+            return ''
+        if time_range_str.min.kind is BoundType.UNBOUNDED:
+            return time_range_str.max.value
+        if time_range_str.max.kind is BoundType.UNBOUNDED:
+            return time_range_str.min.value
+        return f'{time_range_str.min.value}_{time_range_str.max.value}'

@@ -449,10 +449,9 @@ def log_execution_time(prefix='', logging_exception=True):
     return decorator
 
 
-def log_exec_time_inside_func(prefix, func_name, is_log_debug=False):
+def log_exec_time_inside_func(func_name='', is_log_debug=False):
     """
     log inside a function . we use it for generator func
-    :param prefix:
     :param func_name:
     :param is_log_debug:
     :return:
@@ -464,7 +463,7 @@ def log_exec_time_inside_func(prefix, func_name, is_log_debug=False):
         end = perf_counter()
         count_time = end - start
         log_func = logger.debug if is_log_debug else logger.info
-        log_func(f'{prefix} Function: {func_name}; START: {start_dt}; ExecTime: {count_time:.6f}s')
+        log_func(f'{func_name}; START: {start_dt}; ExecTime: {count_time:.6f}s')
 
     return inner
 

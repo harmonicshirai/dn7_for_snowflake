@@ -3,14 +3,17 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Optional, Union
+from uuid import uuid4
 
 import pandas as pd
 from pydantic import BaseModel, ValidationError
 
+from ap import is_internal_version
 from ap.common.common_utils import (
     detect_encoding,
+    safe_import,
 )
-from ap.common.constants import CfgConstantType, CsvDelimiter
+from ap.common.constants import CfgConstantType, CsvDelimiter, CSVExtTypes
 from ap.common.logger import log_execution_time
 from ap.common.path_utils import (
     get_base_dir,
@@ -23,7 +26,6 @@ from ap.common.path_utils import (
 )
 from ap.common.services.api_exceptions import ErrorMessage, Errors
 from ap.common.services.sse import MessageAnnouncer
-from ap.script.r_scripts.wrapr import wrapr_utils
 from ap.setting_module.models import CfgConstant
 
 FILE = 'etl_spray_shape.R'
@@ -113,14 +115,14 @@ def csv_transform(fname, etl_func, proc_id=None):
                     validated_df = etl_instance.validate(df)
                     transformed_df = etl_instance.transform(validated_df)
 
-                    output_fname = os.path.join(out_dir, f'transformed_{os.path.basename(etl_func)}')
+                    output_fname = os.path.join(out_dir, f'{uuid4().hex}.{CSVExtTypes.CSV.value}')
                     transformed_df.to_csv(output_fname, index=False)
                     break
 
             if not output_fname:
                 raise ValueError(f'No valid ETL class found in {etl_func}')
 
-    if output_fname is None:
+    if output_fname is None and is_internal_version:
         output_fname = call_com_read(fname, out_dir)
 
     return output_fname
@@ -154,7 +156,8 @@ def df_transform(df, etl_func):
                             message=f'Could not transform data by {etl_func}. Detail: {str(e)}',
                         )
                         raise ETLException(error_msg=error_msg)
-                    output_fname = os.path.join(out_dir, f'transformed_{os.path.basename(etl_func)}')
+
+                    output_fname = os.path.join(out_dir, f'{uuid4().hex}.{CSVExtTypes.CSV.value}')
                     transformed_df.to_csv(output_fname, index=False)
                     break
 
@@ -189,6 +192,7 @@ def call_com_read(fname, out_dir):
     dic_data = {}  # filecheckr does not need input data
     dic_task = {'func': target_func, 'file': FILE, 'fpath': fname}
 
+    wrapr_utils = safe_import('ap.script.r_scripts.wrapr.wrapr_utils') if is_internal_version else None
     # define and run pipeline
     try:
         pipe = wrapr_utils.RPipeline(get_wrapr_path(), out_dir, use_pkl=False, verbose=True)
@@ -238,6 +242,7 @@ def call_com_view(fname, out_dir):
     dic_data = {}
     dic_task = {'func': target_func, 'file': FILE, 'fpath': fname, 'pass': json_str}
 
+    wrapr_utils = safe_import('ap.script.r_scripts.wrapr.wrapr_utils') if is_internal_version else None
     # define and run pipeline
     try:
         pipe = wrapr_utils.RPipeline(get_wrapr_path(), out_dir, use_pkl=False, verbose=True)

@@ -198,7 +198,7 @@ def export_file(dic_form, export_type=CSVExtTypes.CSV.value):
         if export_from == DataExportMode.PLOT.value:
             # find DIV, as string
             has_facet = graph_param.common.cat_exp and len(graph_param.common.cat_exp) > 0
-            div_id = dic_param[COMMON][DIV_BY_CAT] if DIV_BY_CAT in dic_param[COMMON] else None
+            div_id = dic_param[COMMON].get(DIV_BY_CAT, None)
             div_name = None
             if div_id and len(rlp_dat[CAT_EXP_BOX]):
                 div_var = [var for var in rlp_dat[CAT_EXP_BOX] if str(var[COL_ID]) == div_id]

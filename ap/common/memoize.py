@@ -126,7 +126,7 @@ class CacheConfig:
         # we set `jump_key` parameter and try to get it from function params
         # where we deliberately cache it without calculating ...
         if custom_key_arg is not None:
-            config.custom_key = kwargs.get(custom_key_arg, None)
+            config.custom_key = kwargs.get(custom_key_arg)
 
         # do not cache by request locale for CONFIG_DATA.
         # reasons:
@@ -302,8 +302,8 @@ class CustomCache:
     def clear(cls, cache_type: CacheType | None = None):
         if cache_type is None:
             # clear all
-            for cache_type in cls.cached_keys:
-                cls.cached_keys[cache_type] = []
+            for c in cls.cached_keys:
+                cls.cached_keys[c] = []
             cls.memory_cache.clear()
             cls.disk_cache.clear(retry=True)
         else:

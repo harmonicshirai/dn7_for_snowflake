@@ -907,10 +907,6 @@ msgid "SHOW_GEN_GLOBAL"
 msgstr "紐付ID生成のジョブを表示"
 
 # ap/templates/setting_module/background_process.html
-msgid "DEL_PROCESS"
-msgstr "プロセス情報の削除"
-
-# ap/templates/setting_module/background_process.html
 msgid "FACTORY_IMPORT"
 msgstr "直近データの読み込み"
 
@@ -1476,6 +1472,10 @@ msgstr "ビュー"
 msgid "ImportData"
 msgstr "読み込みデータ"
 
+# ap/template/setting_module/config.html
+msgid "ChangeAllFreqSameDataSourceType"
+msgstr "すべての同じデータソースタイプの変更"
+
 # ap/template/setting_module/trace_config.html
 msgid ""
 "Based on the set config information, generating the ID for linking the "
@@ -1517,6 +1517,14 @@ msgstr "詳細設定"
 #: ap/templates/setting_module/config.html:43
 msgid "ProceedToProcessConfig"
 msgstr "データを読み込むデータベース/CSVファイルの設定を保存しました。プロセス設定ページに進み、読み込むデータの変数を設定し、データを読み込んでください。"
+
+#: ap/api/setting_module/controllers.py
+msgid "changedPollingFreq"
+msgstr "更新周期が変更されました。"
+
+#: ap/api/setting_module/controllers.py
+msgid "Failed to change polling frequency"
+msgstr "更新周期の変更に失敗しました。"
 
 #: ap/template/analyze/hotelling_tsquare.html
 msgid "2 or more variables should be selected for PCA"
@@ -4610,8 +4618,8 @@ msgstr "バックアップデータを完了しました。"
 msgid "Restore data was finished."
 msgstr "データの復元を完了しました。"
 
-msgid "Software Workshop Postgres"
-msgstr "ソフトウェア工房 Postgres"
+msgid "Software Workshop"
+msgstr "ソフトウェア工房"
 
 msgid "Unit"
 msgstr "単位"
@@ -4940,6 +4948,10 @@ msgstr ""
 msgid "SelectJudgeDatatypeModalMsg"
 msgstr "未定義の判定値か、3つ以上の判定値があり、自動設定に失敗しました。強制して判定値にしますか？(その場合変換式を適宜修正してください)"
 
+#: ap/templates/modal.html
+msgid "SelectJudgeDataTypeWarningFilterChangeModalMsg"
+msgstr "フィルタの再設定が必要になります"
+
 #: ap/templates/i18n.html
 msgid "InvalidInputJudgeMsg"
 msgstr "無効な入力があるため、元の値に戻します。"
@@ -4951,4 +4963,92 @@ msgstr "データの取込設定は変更できないため元の値に戻しま
 #: ap/templates/i18n.html
 msgid "JudgeFormulaTitle"
 msgstr "交換式"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "softwareWorkshopPreviewLineGrpLabel"
+msgstr "ライングループ"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "softwareWorkshopPreviewChildEqLabel"
+msgstr "子設備"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderLine"
+msgstr "ライン名（ラインID)"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderChildEq"
+msgstr "子設備（子設備ID）"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderMasterType"
+msgstr "対象データ"
+
+#: ap/templates/i18n.html
+msgid "bulkImportSoftwareWorkshopButton"
+msgstr "一括データ読込"
+
+#: ap/templates/i18n.html
+msgid "processConfigInitSoftwareWorkshopButton"
+msgstr "プロセス設定"
+
+#: ap/templates/i18n.html
+msgid "masterTypeMeasurement"
+msgstr "測定データ"
+
+#: ap/templates/i18n.html
+msgid "masterTypeHistory"
+msgstr "ロット履歴"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "registerProcessButton"
+msgstr "プロセス設定"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "Software Workshop (on-premise)"
+msgstr "V2 ソフトウェア工房ETL"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "RoleLabel"
+msgstr "ユーザーロール"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "WarehouseLabel"
+msgstr "ウェアハウス名"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "AccessTokenRadioLabel"
+msgstr "アクセストークン認証"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "KeypairRadioLabel"
+msgstr "キーペア認証"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakeAccessTokenLabel"
+msgstr "アクセストークン"
+
+#: ap/templates/waveform_plot/waveform_plot.html
+msgid "Waveform plot"
+msgstr "波形プロット"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakePrivateKeyFilePathLabel"
+msgstr "秘密キーファイル"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakePrivateKeyFilePwdLabel"
+msgstr "秘密キーパスワード"
+
+#: ap/templates/i18n.html
+msgid "Import From (UTC)"
+msgstr "インポート開始日 (UTC)"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakeAuthTypeLabel"
+msgstr "認証方法"
+
+#: ap/templates/i18n.html ap/templates/setting_module/db_config.html
+msgid "DataSourceTypeSoftwareWorkshopSnowflake"
+msgstr "V2 ソフトウェア工房ETL(Snowflake)"
 

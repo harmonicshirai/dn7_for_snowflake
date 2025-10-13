@@ -1,11 +1,13 @@
 import logging
 from typing import Any, Callable
 
+import sqlalchemy
 from apscheduler.events import JobExecutionEvent
 from apscheduler.executors.base import BaseExecutor
 from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
 from apscheduler.job import Job
 
+from ap.common.constants import DB_LOCKED_MSG
 from ap.common.jobs.conflict import is_conflict_with_other_jobs
 from ap.common.jobs.jobs import JobKwargs, RunningJob, RunningJobs, RunningJobStatus
 from ap.common.jobs.trigger import always_trigger_job, unwrap_always_triggered_job
@@ -14,15 +16,22 @@ logger = logging.getLogger(__name__)
 
 
 def mark_finished_job_done(event: JobExecutionEvent):
-    """Event listener for: EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED
+    """Event listener for: EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
     That mark each finished job as done
     """
     running_jobs = RunningJobs.get_running_jobs()
 
     with RunningJobs.lock():
         running_job = running_jobs.get(event.job_id)
-        running_job.update(status=RunningJobStatus.EXECUTED, running_jobs=running_jobs)
-        logger.info(f'{event.job_id}: mark complete executing job as done')
+        # in case of database is locked, do not update job status
+        # just keep them auto reschedule again
+        if isinstance(event.exception, sqlalchemy.exc.OperationalError) and DB_LOCKED_MSG in str(
+            event.exception,
+        ):
+            logger.info(f'{event.job_id}: was rescheduled since database is locked')
+        else:
+            running_job.update(status=RunningJobStatus.EXECUTED, running_jobs=running_jobs)
+            logger.info(f'{event.job_id}: mark complete executing job as done')
 
 
 def verify_job_submission(submit_function: Callable[[BaseExecutor, Job, list[Any]], Any]):
@@ -50,7 +59,7 @@ def verify_job_submission(submit_function: Callable[[BaseExecutor, Job, list[Any
                 # Job is running
                 if running_job.status is RunningJobStatus.EXECUTING:
                     logger.info(f'{job_kwargs.job_id}: already running')
-                    # Do not submit
+                    # Do not submit. TODO: need to find a way to raise error without trashing our log
                     return
 
                 # Job is not running, remove it
@@ -61,7 +70,7 @@ def verify_job_submission(submit_function: Callable[[BaseExecutor, Job, list[Any
                 if not running_job.modified():
                     unwrap_always_triggered_job(job)
                     logger.info(f'{job_kwargs.job_id}: already finished, schedule for the next run')
-                    # Do not submit
+                    # Do not submit. TODO: need to find a way to raise error without trashing our log
                     return
 
             # We can be sure that the job is not running for now.
@@ -69,6 +78,7 @@ def verify_job_submission(submit_function: Callable[[BaseExecutor, Job, list[Any
 
             # check before run and tell scheduler that we cannot submit our job
             if is_conflict_with_other_jobs(job_kwargs.job_id, job_kwargs.job_name, job_kwargs.proc_id, running_jobs):
+                # Do not submit. TODO: need to find a way to raise error without trashing our log
                 return
 
             try:
@@ -81,7 +91,7 @@ def verify_job_submission(submit_function: Callable[[BaseExecutor, Job, list[Any
                     added_at=job_kwargs.job_added_at,
                     status=RunningJobStatus.EXECUTING,
                 )
-                logger.info(f'{job_kwargs.job_id}: started to run')
+                logger.info(f'{job_kwargs.job_id}: submitted to executor')
                 submit_function(self, job, run_times)
             except Exception as e:
                 # `super.submit_job` runs into problems,

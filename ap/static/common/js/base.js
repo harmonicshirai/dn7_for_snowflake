@@ -258,7 +258,7 @@ const PARTIAL_ICON_WATCH_PAGES = [
     'gl', // same as agp
     'pca', // same as agp
     'hmp', // same as scp
-    'tv',
+    'wfp',
 ];
 
 function handleError(data) {
@@ -845,6 +845,8 @@ $(async () => {
 
     initCustomSelect();
 
+    zIndexModals.setModalOverlay();
+
     // update tooltips status
     // default is show tooltips on graph
     // true || null: show, false: hide
@@ -929,6 +931,21 @@ const onSearchTableContent = (inputID, tbID, inputElement = null) => {
         handleInputTextZenToHanEvent(e);
         const { value } = e.currentTarget;
         searchTableContent(tbID, value, false);
+    });
+};
+
+const onSearchTableContentByKeypressInput = (inputID, tbID) => {
+    const inputEl = $(`${inputID}`);
+    initCommonSearchInput(inputEl, '', $.Event('input', { keyCode: KEY_CODE.ENTER, which: KEY_CODE.ENTER }));
+    inputEl.on('keypress input', (e) => {
+        if (e.keyCode !== KEY_CODE.ENTER) {
+            const value = stringNormalization(e.currentTarget.value);
+            searchTableContent(tbID, value, true);
+        } else {
+            handleInputTextZenToHanEvent(e);
+            const { value } = e.currentTarget;
+            searchTableContent(tbID, value, false);
+        }
     });
 };
 
@@ -1364,10 +1381,11 @@ const showPlotView = (queryString) => {
     return false;
 };
 
-const initCommonSearchInput = (inputElement, className = '') => {
+const initCommonSearchInput = (inputElement, className = '', $event = 'input') => {
     // common-search-input
     if (inputElement.closest('.deleteicon').length) return;
 
+    inputElement.closest('#groupTable').length === 1 ? (className = 'w-100') : '';
     inputElement.wrap(`<span class="deleteicon ${className}"></span>`).after($('<span class="remove-search">x</span>'));
 
     $('.remove-search').off('click');
@@ -1375,7 +1393,7 @@ const initCommonSearchInput = (inputElement, className = '') => {
         const e = $.Event('change');
         e.which = KEY_CODE.ENTER;
         e.keyCode = KEY_CODE.ENTER;
-        $(this).prev('input').val('').trigger('input').focus().trigger(e);
+        $(this).prev('input').val('').trigger($event).focus().trigger(e);
     });
 };
 

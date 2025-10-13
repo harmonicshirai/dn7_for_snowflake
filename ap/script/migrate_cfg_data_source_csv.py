@@ -1,12 +1,9 @@
-from ap.common.constants import DBType, RelationShip
+import sqlalchemy as sa
 from ap.common.pydn.dblib import sqlite
 from ap.setting_module.models import (
     CfgDataSourceCSV,
     CfgProcessColumn,
     CfgProcess,
-    make_session,
-    insert_or_update_config,
-    CfgDataSource,
 )
 
 process_name_column = """alter table cfg_data_source_csv add process_name text;"""
@@ -105,18 +102,18 @@ def migrate_cfg_process_column(app_db):
         app_db.execute_sql("""ALTER TABLE cfg_process ADD name_local text;""")
 
 
-def migrate_skip_head_value():
-    with make_session() as meta_session:
-        data_sources = meta_session.query(CfgDataSource).filter(CfgDataSource.type == DBType.CSV.value.upper()).all()
-        for data_source in data_sources:
-            csv_detail = data_source.csv_detail
-            # for existing csv data sources, convert skip_head from 0 to None if there is no dummy header generated
-            if not csv_detail.dummy_header and csv_detail.skip_head == 0:
-                csv_detail.skip_head = None
-            insert_or_update_config(
-                meta_session,
-                csv_detail,
-                parent_obj=data_source,
-                parent_relation_key=CfgDataSource.csv_detail.key,
-                parent_relation_type=RelationShip.ONE,
+def migrate_skip_head_value(conn):
+    get_ds_csv_sql = "SELECT * FROM cfg_data_source_csv"
+    data_sources = conn.execute(sa.text(get_ds_csv_sql) ).fetchall()
+    data_sources: list[dict] = [data_source._asdict() for data_source in data_sources]
+    for csv_detail in data_sources:
+        # for existing csv data sources, convert skip_head from 0 to None if there is no dummy header generated
+        if not csv_detail['dummy_header'] and csv_detail['skip_head'] == 0:
+            csv_detail['skip_head'] = None
+            cols_str = ','.join([k for k in csv_detail.keys()])
+            param_str = ','.join([f':{key}' for key in csv_detail.keys()])
+            conn.execute(
+                sa.text(f'INSERT OR REPLACE INTO cfg_data_source_csv ({cols_str}) VALUES ({param_str})').bindparams(
+                    *[sa.bindparam(key, value, literal_execute=True) for key, value in csv_detail.items()]
+                )
             )

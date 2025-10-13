@@ -25,8 +25,7 @@ class CacheFunctions:
     ):
         if process_ids is None:
             # Truly get a list of process's id in Database (not in cache) to calculate cache for real processes
-            processes = CfgProcess.get_all_ids(with_parent=True)
-            process_ids = [process.id for process in processes]
+            process_ids = CfgProcess.get_all_ids(with_parent=True)
 
         def generator():
             progress_percent = 0

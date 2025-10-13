@@ -38,6 +38,9 @@ class SingleIndex(DBIndex):
     def __eq__(self, other: 'SingleIndex') -> bool:
         return str(self) == str(other)
 
+    def __hash__(self) -> int:
+        return hash(self.col)
+
 
 class CastTextIndex(DBIndex):
     def __init__(self, col: str):
@@ -192,9 +195,7 @@ class ColumnInfo:
     def is_good_key(self) -> bool:
         if not self.substr_from and not self.substr_to:
             return False
-        if self.substr_from >= self.substr_to:
-            return False
-        return True
+        return not self.substr_from >= self.substr_to
 
     def is_bad_key(self) -> bool:
         return not self.is_good_key()

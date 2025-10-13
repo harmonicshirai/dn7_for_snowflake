@@ -142,7 +142,7 @@ def gen_graphical_lasso(graph_param, dic_param, df=None):
         for sensor_id in nominal_vars:
             if sensor_id in cat_ids.keys():
                 nominal_labels.append(cat_ids[sensor_id])
-        if len(nominal_labels):
+        if nominal_labels:
             nominal_vars = nominal_labels
 
     alphas, best_alpha, threshold, dic_nodes, dic_edges = (None, None, None, None, None)

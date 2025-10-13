@@ -1,6 +1,6 @@
 const getColName = (procId, colId) => {
     const column = procConfigs[procId].getColumnById(colId) || {};
-    return column.shown_name || colId;
+    return column.name || colId;
 };
 
 const genScatterOutlierTrace = (sctData, isShowContour = false, procName = null, cycleIDs = [], options) => {

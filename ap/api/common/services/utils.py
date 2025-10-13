@@ -109,7 +109,7 @@ def get_well_known_columns_for_v2_type(
     normalized_cols = normalize_column_name(cols)
 
     def get_group_type(col: str, normalized_col: str) -> str | None:
-        return well_known_columns.get(col, None) or well_known_columns.get(normalized_col, None)
+        return well_known_columns.get(col) or well_known_columns.get(normalized_col)
 
     group_types = map(get_group_type, cols, normalized_cols)
     return {col: group_type for col, group_type in zip(cols, group_types) if group_type is not None}

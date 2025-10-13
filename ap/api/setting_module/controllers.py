@@ -4,17 +4,20 @@ import itertools
 import json
 import logging
 import os
+from contextlib import suppress
 from datetime import datetime
 from typing import Optional
 
 import flask
+import flask_migrate
 import pandas as pd
 from apscheduler.triggers.date import DateTrigger
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
+from flask_babel import get_locale
 from flask_babel import gettext as _
 from pytz import utc
 
-from ap import background_jobs, close_sessions, dic_config, max_graph_config, scheduler
+from ap import background_jobs, close_sessions, dic_config, is_admin_request, max_graph_config, scheduler
 from ap.api.common.services.show_graph_services import check_path_exist, sorted_function_details
 from ap.api.efa.services.etl import ETLException
 from ap.api.setting_module.services.autolink import Autolink
@@ -28,14 +31,15 @@ from ap.api.setting_module.services.common import (
     save_user_settings,
 )
 from ap.api.setting_module.services.data_import import (
+    DbConnectionParam,
     check_db_con,
-    update_or_create_constant_by_type,
 )
 from ap.api.setting_module.services.equations import (
     EquationSampleData,
     validate_functions,
 )
 from ap.api.setting_module.services.filter_settings import (
+    delete_cfg_filter_by_ids,
     delete_cfg_filter_from_db,
     save_filter_config,
 )
@@ -48,11 +52,16 @@ from ap.api.setting_module.services.import_function_column import (
 )
 from ap.api.setting_module.services.polling_frequency import (
     add_idle_monitoring_job,
+    add_import_job,
+    add_import_job_params,
     change_polling_all_interval_jobs,
+    handle_update_polling,
+    has_important_changes,
 )
 from ap.api.setting_module.services.process_delete import (
     del_data_source,
     delete_proc_cfg_and_relate_jobs,
+    delete_pulled_data_folders,
     initialize_proc_config,
 )
 from ap.api.setting_module.services.save_load_user_setting import map_form, transform_settings
@@ -78,6 +87,7 @@ from ap.api.trace_data.services.proc_link import (
     show_proc_link_info,
 )
 from ap.api.trace_data.services.proc_link_simulation import sim_gen_global_id
+from ap.common.authorization import login_required
 from ap.common.backup_db import backup_config_db
 from ap.common.clean_expired_request import add_job_delete_expired_request
 from ap.common.common_utils import (
@@ -89,6 +99,7 @@ from ap.common.common_utils import (
 from ap.common.constants import (
     ANALYSIS_INTERFACE_ENV,
     DATA_CACHE_FOLDER,
+    DISABLE_CONFIG_FROM_EXTERNAL_KEY,
     EMPTY_STRING,
     FILE_NAME,
     FISCAL_YEAR_START_MONTH,
@@ -96,18 +107,19 @@ from ap.common.constants import (
     SHUTDOWN,
     UI_ORDER_DB,
     UNIVERSAL_DB_FILE,
+    WITH_CHANGE_ALL_FREQ_SAME_DS,
     WITH_IMPORT_OPTIONS,
     Action,
     AnnounceEvent,
     AppEnv,
-    CfgConstantType,
     CSVExtTypes,
     DataColumnType,
     JobStatus,
     JobType,
     MasterDBType,
+    ProcessCfgConst,
+    ProcessColumnConst,
 )
-from ap.common.cryptography_utils import decrypt_pwd
 from ap.common.datetime_format_utils import convert_datetime_format
 from ap.common.memoize import clear_cache
 from ap.common.multiprocess_sharing import EventAddJob, EventBackgroundAnnounce, EventQueue, EventRemoveJobs
@@ -128,7 +140,6 @@ from ap.common.services.import_export_config_and_master_data import (
     pause_job_running,
     resume_event_queue,
     revert_instance_folder,
-    run_migrations,
     wait_done_jobs,
 )
 from ap.common.services.jp_to_romaji_utils import to_romaji
@@ -153,12 +164,14 @@ from ap.setting_module.schemas import (
     DataSourceSchema,
     ProcessSchema,
     ProcessVisualizationSchema,
+    SWProcessSchema,
 )
 from ap.setting_module.services.background_process import get_background_jobs_service, get_job_detail_service
 from ap.setting_module.services.backup_and_restore.jobs import add_backup_data_job, add_restore_data_job
 from ap.setting_module.services.process_config import (
     create_or_update_process_cfg,
     get_ct_range,
+    get_line_grp_info,
     get_process_cfg,
     get_process_columns,
     get_process_filters,
@@ -182,43 +195,62 @@ api_setting_module_blueprint = Blueprint('api_setting_module', __name__, url_pre
 
 
 @api_setting_module_blueprint.route('/update_polling_freq', methods=['POST'])
+@login_required
 def update_polling_freq():
-    data_update = json.loads(request.data)
-    with_import_option = data_update.get(WITH_IMPORT_OPTIONS)
-    freq_min = parse_int_value(data_update.get(CfgConstantType.POLLING_FREQUENCY.name)) or 0
+    try:
+        data_update = json.loads(request.data)
 
-    # save/update POLLING_FREQUENCY to db
-    freq_sec = freq_min * 60
-    update_or_create_constant_by_type(const_type=CfgConstantType.POLLING_FREQUENCY.name, value=freq_sec)
+        with_import_option = data_update.get(WITH_IMPORT_OPTIONS)
+        polling_freq_str = data_update.get('polling_frequency')
+        data_source_id = data_update.get('data_source_id')
+        with_change_all_freq_same_ds = data_update.get(WITH_CHANGE_ALL_FREQ_SAME_DS)
 
-    is_user_request = bool(with_import_option and freq_min == 0)
-    # re-set trigger time for all jobs
-    change_polling_all_interval_jobs(interval_sec=freq_sec, run_now=with_import_option, is_user_request=is_user_request)
+        polling_freq = parse_int_value(polling_freq_str) if polling_freq_str is not None else None
+        data_src_type = CfgDataSource.get_by_id(data_source_id).type
 
-    message = {'message': _('Database Setting saved.'), 'is_error': False}
+        if with_change_all_freq_same_ds:
+            data_src_ids_by_src_type = CfgDataSource.get_ids_by_type(data_src_type)
+        else:
+            data_src_ids_by_src_type = [data_source_id]
 
+        for data_source_id in data_src_ids_by_src_type:
+            with make_session() as meta_session:
+                CfgDataSource.update_polling_freq(
+                    meta_session, data_source_id=data_source_id, polling_frequency=polling_freq
+                )
+            data_src = CfgDataSource.get_by_id(data_source_id)
+            handle_update_polling(data_src, with_import_option, True)
+
+    except Exception as e:
+        logger.exception(e)
+        message = {'message': _('Failed to change polling frequency'), 'is_error': True}
+        return jsonify(flask_message=message), 500
+
+    message = {
+        'message': _('changedPollingFreq'),
+        'is_error': False,
+        'data_source_ids': data_src_ids_by_src_type,
+        'data_src_type': data_src_type,
+    }
     return jsonify(flask_message=message), 200
 
 
 @api_setting_module_blueprint.route('/data_source_save', methods=['POST'])
+@login_required
 def save_datasource_cfg():
     """
     Expected: ds_config = {"db_0001": {"master-name": name, "host": localhost, ...}}
     """
 
-    params = json.loads(request.data)
-    db_password = (params.get('db_detail') or {}).get('password')
     try:
-        data_src: CfgDataSource = DataSourceSchema().load(request.json)
+        data_src_req: CfgDataSource = DataSourceSchema().load(request.json)
+        is_polling_freq_changed, is_pull_from_changed = has_important_changes(data_src_req)
 
-        # have data_src.id and db_detail and empty password => not change password
-        if data_src.db_detail is not None and data_src.id and db_password == EMPTY_STRING:
-            db = CfgDataSourceDB.get_by_id(data_src.id)
-            if db is not None:
-                data_src.db_detail.password = db.password
         with make_session() as meta_session:
-            data_src = meta_session.merge(data_src)
+            data_src = meta_session.merge(data_src_req)
 
+        with_import_option = request.json.get(WITH_IMPORT_OPTIONS) or is_pull_from_changed
+        handle_update_polling(data_src, with_import_option, is_polling_freq_changed)
     except Exception as e:
         logger.exception(e)
         message = {'message': _('Database Setting failed to save'), 'is_error': True}
@@ -234,6 +266,7 @@ def save_datasource_cfg():
 
 
 @api_setting_module_blueprint.route('/v2_data_source_save', methods=['POST'])
+@login_required
 def save_v2_datasource_cfg():
     """
     Expected: ds_config = [{"db_0001": {"master-name": name, "host": localhost, ...}}]
@@ -248,6 +281,7 @@ def save_v2_datasource_cfg():
             v2_data_src['csv_detail']['dummy_header'] = False
 
             data_src: CfgDataSource = DataSourceSchema().load(v2_data_src)
+            is_polling_freq_changed, is_pull_from_changed = has_important_changes(data_src)
 
             with make_session() as meta_session:
                 # data source
@@ -259,12 +293,16 @@ def save_v2_datasource_cfg():
                 ds = ds_schema.dumps(ds)
                 v2_datasources.append({'id': data_src_rec.id, 'data_source': ds})
 
+            with_import_option = v2_data_src.get(WITH_IMPORT_OPTIONS) or is_pull_from_changed
+            handle_update_polling(data_src_rec, with_import_option, is_polling_freq_changed)
+
         message = {'message': _('Database Setting saved.'), 'is_error': False}
         return jsonify(data=v2_datasources, flask_message=message), 200
+
     except Exception as e:
         logger.exception(e)
         message = {'message': _('Database Setting failed to save'), 'is_error': True}
-        return jsonify(flask_message=message), 500
+    return jsonify(flask_message=message), 500
 
 
 # TODO: refactoring check connection without this function
@@ -308,30 +346,17 @@ def check_db_connection():
     Returns:
         HTTP Response - (True + OK message) if connection can be established, return (False + NOT OK message) otherwise.
     """
-    params = json.loads(request.data).get('db')
-    db_id = params.get('id')
-    db_type = params.get('db_type')
-    host = params.get('host')
-    port = params.get('port')
-    dbname = params.get('dbname')
-    schema = params.get('schema')
-    username = params.get('username')
-    password = params.get('password', EMPTY_STRING)
-
-    if db_id is not None and password == EMPTY_STRING:
-        db = CfgDataSourceDB.get_by_id(db_id)
-        if db is not None:
-            password = decrypt_pwd(db.password)
+    params = DbConnectionParam.model_validate(json.loads(request.data).get('db'))
     result = None
     try:
-        result = check_db_con(db_type, host, port, dbname, schema, username, password)
+        result = check_db_con(params)
     except Exception as e:
         logger.exception(e)
 
     if result:
-        message = {'db_type': db_type, 'message': _('Connected'), 'connected': True}
+        message = {'db_type': params.db_type, 'message': _('Connected'), 'connected': True}
     else:
-        message = {'db_type': db_type, 'message': _('Failed to connect'), 'connected': False}
+        message = {'db_type': params.db_type, 'message': _('Failed to connect'), 'connected': False}
 
     return jsonify(flask_message=message), 200
 
@@ -388,7 +413,7 @@ def show_latest_records():
     preview_data = None
     if current_process_id and current_process_id != 'null' and not file_name:
         # get data from db or csv
-        preview_file_name = get_preview_data_files(data_source_id, table_name, process_factid, etl_func)
+        preview_file_name = get_preview_data_files(data_source_id, table_name, process_factid, master_type, etl_func)
         if preview_file_name:
             with open(preview_file_name, 'r') as file:
                 preview_data = get_latest_record_from_preview_file(file, current_process_id, limit)
@@ -442,7 +467,8 @@ def show_latest_records():
         except ETLException as e:
             result['transform_error'] = e.get_message()
             response_code = e.status_code
-        except (Exception, FileNotFoundError):
+        except (Exception, FileNotFoundError) as e:
+            logger.exception(e)
             if preview_data is not None:
                 return json_dumps(preview_data)
         result = json_dumps(result)
@@ -451,6 +477,7 @@ def show_latest_records():
             result,
             table_name=table_name,
             process_factid=process_factid,
+            master_type=master_type,
             etl_func=etl_func,
         )
         return result, response_code
@@ -469,6 +496,7 @@ def get_csv_resources():
     n_rows = None if n_rows is None else int(n_rows)
     is_transpose = request.json.get('is_transpose')
     is_file = request.json.get('is_file')
+    is_file_checker = request.json.get('is_file_checker') or False
 
     # todo: is_show_raw_data to handle raw data for datasource preview, but datetime is wrong <- check it again
     if is_v2:
@@ -490,6 +518,7 @@ def get_csv_resources():
             limit=5,
             file_name=folder_url if is_file else None,
             is_show_raw_data=False,
+            is_file_checker=is_file_checker,
         )
     rows = dic_output['content']
     previewed_files = dic_output['previewed_files']
@@ -588,6 +617,7 @@ def get_job_detail(job_id):
 
 
 @api_setting_module_blueprint.route('/delete_process', methods=['POST'])
+@login_required
 def delete_proc_from_db():
     # get proc_id
     params = json.loads(request.data)
@@ -601,6 +631,7 @@ def delete_proc_from_db():
 
 
 @api_setting_module_blueprint.route('/save_order/<order_name>', methods=['POST'])
+@login_required
 def save_order(order_name):
     """[Summary] Save orders to DB
     Returns: 200/500
@@ -623,6 +654,7 @@ def save_order(order_name):
 
 
 @api_setting_module_blueprint.route('/delete_datasource_cfg', methods=['POST'])
+@login_required
 def delete_datasource_cfg():
     params = json.loads(request.data)
     data_source_id = params.get('db_code')
@@ -633,6 +665,7 @@ def delete_datasource_cfg():
 
 
 @api_setting_module_blueprint.route('/stop_job', methods=['POST'])
+@login_required
 def stop_jobs():
     try:
         if not is_local_client(request):
@@ -673,13 +706,163 @@ def stop_jobs():
 
 
 @api_setting_module_blueprint.route('/shutdown', methods=['POST'])
+@login_required
 def shutdown():
     dic_config[SHUTDOWN] = True
     response = flask.make_response(jsonify({}))
     return response, 200
 
 
+@api_setting_module_blueprint.route('/sw_register', methods=['POST'])
+def post_sw_register():
+    """
+    software workshop datasource bulk register and import
+    """
+    ja_locale = False
+    with suppress(Exception):
+        ja_locale = get_locale().language == 'ja'
+    try:
+        payload = json.loads(request.data)
+        datasource = payload.get('datasource')
+        processes = payload.get('processes')
+        is_directly_import = payload.get('is_directly_import') or False
+        # to register datasource and return ids
+        data_src_req: CfgDataSource = DataSourceSchema().load(datasource)
+        is_polling_freq_changed, is_pull_from_changed = has_important_changes(data_src_req)
+
+        if (
+            data_src_req.db_detail is not None
+            and data_src_req.id
+            and datasource.get('db_detail', {}).get('password', None) == EMPTY_STRING
+        ):
+            db = CfgDataSourceDB.get_by_id(data_src_req.id)
+            if db is not None:
+                data_src_req.db_detail.password = db.password
+
+        with make_session() as meta_session:
+            data_src = meta_session.merge(data_src_req)
+
+        with_import_option = datasource.get(WITH_IMPORT_OPTIONS) or is_pull_from_changed
+        handle_update_polling(data_src, with_import_option, is_polling_freq_changed)
+
+        output_procs = []
+        if processes:
+            # Process needed for the job
+            process_to_jobs = []
+            # to combine process data with parent datasource id
+            for item in processes:
+                table_name = item.get(ProcessCfgConst.TABLE_NAME.value, '')
+                master_type = str(item.get(ProcessCfgConst.MASTER_TYPE.value))
+                master_type = MasterDBType[master_type] if MasterDBType.has_key(master_type) else None
+                history_suffix = (
+                    f'_{master_type.get_data_type()}'
+                    if master_type is not MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT
+                    else ''
+                )
+                proc_name = f'{data_src.name}_{table_name}{history_suffix}'
+                proc_name_en = to_romaji(proc_name)
+                process_factid = str(item.get(ProcessCfgConst.CHILD_EQUIP_ID.value))
+
+                # get columns from sw table
+                (detected_columns, *_tmp_) = get_latest_records(
+                    data_source_id=data_src.id,
+                    table_name=table_name,
+                    limit=1000,
+                    process_factid=process_factid,
+                    master_type=master_type,
+                )
+                has_ct_column = False
+                sw_columns = []
+                for col in detected_columns:
+                    col_dtype = DataColumnType.GENERATED.value
+
+                    if col[ProcessColumnConst.IS_GET_DATE.value] or col[ProcessColumnConst.IS_DUMMY_DATETIME.value]:
+                        col_dtype = DataColumnType.DATETIME.value
+                        has_ct_column = True
+
+                    if col[ProcessColumnConst.IS_SERIAL_NO.value]:
+                        col_dtype = DataColumnType.SERIAL.value
+
+                    if col[ProcessColumnConst.IS_MAIN_SERIAL_NO.value]:
+                        col_dtype = DataColumnType.MAIN_SERIAL.value
+                        col[ProcessColumnConst.IS_SERIAL_NO.value] = True
+
+                    if col.get(ProcessColumnConst.IS_AUTO_INCREMENT.value):
+                        col_dtype = DataColumnType.DATETIME_KEY.value
+
+                    sw_columns.append(
+                        {
+                            **col,
+                            ProcessColumnConst.COLUMN_TYPE.value: col_dtype,
+                            ProcessColumnConst.PREDICT_TYPE.value: col[ProcessColumnConst.DATA_TYPE.value],
+                        },
+                    )
+                # if there is no datetime column, do not create process
+                if not has_ct_column:
+                    continue
+
+                # make process data
+                sw_process = {
+                    ProcessCfgConst.DATA_SOURCE_ID.value: data_src.id,
+                    ProcessCfgConst.PROC_NAME.value: proc_name_en,
+                    ProcessCfgConst.TABLE_NAME.value: table_name,
+                    ProcessCfgConst.FACT_ID.value: process_factid,
+                    ProcessCfgConst.MASTER_TYPE.value: master_type.name,
+                    ProcessCfgConst.NAME_JP.value: proc_name if ja_locale else None,
+                    ProcessCfgConst.PROC_NAME_EN.value: proc_name_en,
+                    ProcessCfgConst.NAME_LOCAL.value: proc_name_en if not ja_locale else None,
+                    ProcessCfgConst.IS_IMPORT.value: is_directly_import,
+                    ProcessCfgConst.PROC_COLUMNS.value: sw_columns,
+                }
+                # register SW process with all detected columns
+                process: CfgProcess = SWProcessSchema().load(sw_process)
+                # to register process
+                with make_session() as meta_session:
+                    process = meta_session.merge(process)
+
+                process_to_jobs.append(process)
+                # to add process record into process table
+                output_procs.append(ProcessSchema().dump(process))
+                data_register_data = {
+                    'process': ProcessSchema().dump(process),
+                    'status': JobStatus.DONE.name,
+                    'is_first_imported': is_directly_import,
+                }
+                EventQueue.put(
+                    EventBackgroundAnnounce(data=data_register_data, event=AnnounceEvent.PROCESS_BULK_REGISTER),
+                )
+
+            if is_directly_import:
+                # Add jobs after all processes are registered to optimize pulling data job
+                for process in process_to_jobs:
+                    params = add_import_job_params(process)
+                    add_import_job(
+                        process_id=params.process_id,
+                        process_name=params.process_name,
+                        data_source_id=params.data_source_id,
+                        data_source_type=params.data_source_type,
+                        interval_sec=params.polling_frequency,
+                        run_now=True,
+                        is_user_request=True,
+                    )
+        message = {'message': _('Database Setting saved.'), 'is_error': False}
+        ds = None
+        if data_src and data_src.id:
+            ds = DataSourceSchema().dumps(data_src)
+        return jsonify(
+            id=data_src.id,
+            data_source=ds,
+            processes=output_procs,
+            flask_message=message,
+        ), 200
+    except Exception as e:
+        logger.exception(e)
+        message = {'message': _('Database Setting failed to save'), 'is_error': True}
+        return jsonify(flask_message=message), 500
+
+
 @api_setting_module_blueprint.route('/proc_config', methods=['POST'])
+@login_required
 def post_proc_config():
     process_schema = ProcessSchema()
     request_process: CfgProcess = process_schema.load(request.json.get('proc_config'))
@@ -698,6 +881,7 @@ def post_proc_config():
             # In case if user A delete process `proc_id`, and user B update process `proc_id`,
             # we need to prevent user B performing that action.
             exist_process = CfgProcess.get_proc_by_id(request_process.id)
+
             if not exist_process:
                 return (
                     jsonify(
@@ -709,10 +893,22 @@ def post_proc_config():
                     200,
                 )
 
+            exist_judge_col_id = next((col.id for col in exist_process.columns if col.is_judge), None)
+            request_judge_col_id = next((col.id for col in request_process.columns if col.is_judge), None)
+            judge_col_ids = {
+                col_id
+                for col_id in (exist_judge_col_id, request_judge_col_id)
+                if exist_judge_col_id != request_judge_col_id and col_id is not None
+            }
+
+            filter_ids = [item.id for item in exist_process.filters if item.column_id in judge_col_ids]
+            delete_cfg_filter_by_ids(filter_ids)
+
             old_main_serial_cfg_process_column = exist_process.get_main_serial_column(is_isolation_object=True)
 
             # Remove import jobs before running update transaction table job
             target_jobs = [
+                JobType.IMPORT_DATA,
                 JobType.CSV_IMPORT,
                 JobType.FACTORY_IMPORT,
                 JobType.FACTORY_PAST_IMPORT,
@@ -724,6 +920,7 @@ def post_proc_config():
             EventQueue.put(EventRemoveJobs(job_types=target_jobs, process_id=exist_process.id))
 
         # Do update cfg_process, cfg_process_column, cfg_process_unused_column
+        processes_to_queue_jobs = []
         with make_session() as session:
             process = create_or_update_process_cfg(request_process, unused_columns, meta_session=session)
             process = process.clone()
@@ -732,16 +929,11 @@ def post_proc_config():
             if is_new_proc:
                 # In case new process, do update transaction table immediately
                 list(update_transaction_table(process, old_main_serial_cfg_process_column, meta_session=session))
+                processes_to_queue_jobs.append(process)
             else:
                 # If there are new function columns, add the columns into transaction table first to make show graph
                 # feature work normally
                 add_new_columns_to_transaction_table(process, meta_session=session)
-                parents_and_children_processes = CfgProcess.get_all_parents_and_children_processes(
-                    request_process.id,
-                    session=session,
-                )
-                for process in parents_and_children_processes:
-                    CfgProcess.update_is_import(session, process.id, is_import=True)
                 is_show_warning_message = determine_show_warning_message(
                     process,
                     old_main_serial_cfg_process_column=old_main_serial_cfg_process_column,
@@ -765,9 +957,13 @@ def post_proc_config():
                         max_instances=1,
                     ),
                 )
+                processes_to_queue_jobs = CfgProcess.get_all_parents_and_children_processes(
+                    request_process.id,
+                    session=session,
+                )
 
-        # After commit all changes, add jobs
-        add_required_jobs_after_update_transaction_table(process, is_new_process=is_new_proc)
+        for process in processes_to_queue_jobs:
+            add_required_jobs_after_update_transaction_table(process, is_new_process=is_new_proc)
 
         return (
             jsonify(
@@ -792,6 +988,7 @@ def post_proc_config():
 
 
 @api_setting_module_blueprint.route('/initialize_proc/<process_id>', methods=['POST'])
+@login_required
 def initialize_process(process_id):
     try:
         initialize_proc_config(process_id)
@@ -816,6 +1013,7 @@ def get_trace_configs():
 
 
 @api_setting_module_blueprint.route('/trace_config', methods=['POST'])
+@login_required
 def save_trace_configs():
     """[Summary] Save trace_configs to DB
     Returns: 200/500
@@ -841,6 +1039,7 @@ def ds_load_detail(ds_id):
 
 
 @api_setting_module_blueprint.route('/proc_config/<proc_id>', methods=['DELETE'])
+@login_required
 def del_proc_config(proc_id):
     return (
         jsonify(
@@ -886,6 +1085,7 @@ def get_proc_config_filter_data(proc_id):
     columns = process.get('columns')
     process['columns'] = [column for column in columns if column.get(CfgProcessColumn.function_details.key) is not None]
     filter_col_data = {}
+    is_authorized = (current_app.config.get(DISABLE_CONFIG_FROM_EXTERNAL_KEY) is False or is_admin_request(request),)
     if process:
         if not process['name_en']:
             process['name_en'] = to_romaji(process['name'])
@@ -895,6 +1095,7 @@ def get_proc_config_filter_data(proc_id):
                     'status': 200,
                     'data': process,
                     'filter_col_data': filter_col_data,
+                    'is_authorized': is_authorized,
                 },
             ),
             200,
@@ -906,6 +1107,7 @@ def get_proc_config_filter_data(proc_id):
                     'status': 404,
                     'data': {},
                     'filter_col_data': {},
+                    'is_authorized': is_authorized,
                 },
             ),
             200,
@@ -1046,6 +1248,7 @@ def get_proc_traces_with_start_proc(proc_id, start_proc_id):
 
 
 @api_setting_module_blueprint.route('/filter_config', methods=['POST'])
+@login_required
 def save_filter_config_configs():
     """[Summary] Save filter_config to DB
     Returns: 200/500
@@ -1064,6 +1267,7 @@ def save_filter_config_configs():
 
 
 @api_setting_module_blueprint.route('/filter_config/<filter_id>', methods=['DELETE'])
+@login_required
 def delete_filter_config(filter_id):
     """[Summary] delete filter_config from DB
     Returns: 200/500
@@ -1094,6 +1298,7 @@ def get_sensor_distinct_values(cfg_col_id):
 
 
 @api_setting_module_blueprint.route('/proc_config/<proc_id>/visualizations', methods=['POST'])
+@login_required
 def post_master_visualizations_config(proc_id):
     proc = save_master_vis_config(proc_id, request.json)
     if proc is not None:
@@ -1105,6 +1310,7 @@ def post_master_visualizations_config(proc_id):
 
 
 @api_setting_module_blueprint.route('/simulate_proc_link', methods=['POST'])
+@login_required
 def simulate_proc_link():
     """[Summary] simulate proc link id
     Returns: 200/500
@@ -1214,6 +1420,7 @@ def get_user_setting_page_top():
 
 
 @api_setting_module_blueprint.route('/user_setting/<setting_id>', methods=['DELETE'])
+@login_required
 def delete_user_setting(setting_id):
     """[Summary] delete user_setting from DB
     Returns: 200/500
@@ -1357,6 +1564,7 @@ def check_duplicated_process_name():
 
 
 @api_setting_module_blueprint.route('/register_source_and_proc', methods=['POST'])
+@login_required
 def register_source_and_proc():
     try:
         new_process_ids = handle_importing_by_one_click(request.json)
@@ -1436,7 +1644,7 @@ def get_function_infos():
             x_data_type = column_x.data_type
             var_x_data = dict_sample_data[str(var_x)]
             if column_x.function_details:
-                var_x_function_column_id = seen_function_column_ids.get(var_x, None)
+                var_x_function_column_id = seen_function_column_ids.get(var_x)
 
         if var_y:
             column_y: CfgProcessColumn = dict_cfg_process_column[var_y]
@@ -1444,7 +1652,7 @@ def get_function_infos():
             y_data_type = column_y.data_type
             var_y_data = dict_sample_data[str(var_y)]
             if column_y.function_details:
-                var_y_function_column_id = seen_function_column_ids.get(var_y, None)
+                var_y_function_column_id = seen_function_column_ids.get(var_y)
 
         seen_function_column_ids[function_detail.process_column_id] = function_detail.id
 
@@ -1502,6 +1710,7 @@ def get_function_infos():
 
 
 @api_setting_module_blueprint.route('/function_config/delete_function_columns', methods=['POST'])
+@login_required
 def delete_function_column_config():
     """[Summary] delete function column from DB
     Returns: 200/500
@@ -1553,6 +1762,7 @@ def restore_data():
 
 
 @api_setting_module_blueprint.route('/delete_log_data', methods=['DELETE'])
+@login_required
 def delete_log_data():
     log_path = get_log_path()
     delete_file_and_folder_by_path(log_path)
@@ -1560,12 +1770,14 @@ def delete_log_data():
 
 
 @api_setting_module_blueprint.route('/delete_folder_data', methods=['DELETE'])
+@login_required
 def delete_folder_data_api():
     delete_folder_data(ignore_folder=DATA_CACHE_FOLDER)
     return {}, 200
 
 
 @api_setting_module_blueprint.route('/clear_cache', methods=['POST'])
+@login_required
 def clear_cache_api():
     """[Summary] delete cache in backend, only used for test"""
     clear_cache()
@@ -1603,8 +1815,6 @@ def proc_link_preview():
             trans_data = TransactionData(process_id)
             with DbProxy(
                 gen_data_source_of_universal_db(process_id),
-                True,
-                immediate_isolation_level=False,
             ) as db_instance:
                 link_cols = trans_data.cfg_process.get_linking_columns()
                 samples = trans_data.get_sample_data(db_instance, columns=link_cols)
@@ -1643,6 +1853,9 @@ def zip_import_database():
     close_sessions()
     clear_cache()
     try:
+        # remove all pulled data
+        delete_pulled_data_folders(CfgProcess.get_all_ids())
+
         # Backup current config before importing data from upload file
         backup_instance_folder()
         # ↓--- Save uploaded file to export_setting folder ---↓
@@ -1659,7 +1872,7 @@ def zip_import_database():
         # ↑--- import data from upload file ---↑
 
         # ↓--- Resume scheduler, migrate and clean up ---↓
-        run_migrations()
+        flask_migrate.upgrade()
         scheduler.resume()
         clear_event_queue()
         resume_event_queue()
@@ -1674,9 +1887,7 @@ def zip_import_database():
         add_idle_monitoring_job()
         add_restructure_indexes_job()
 
-        interval_sec = CfgConstant.get_value_by_type_first(CfgConstantType.POLLING_FREQUENCY.name, int)
-        if interval_sec:
-            change_polling_all_interval_jobs(interval_sec, run_now=True)
+        change_polling_all_interval_jobs(run_now=True)
 
         proc_link_count_job(is_user_request=True)
         add_job_delete_expired_request()
@@ -1696,6 +1907,7 @@ def zip_import_database():
 
 
 @api_setting_module_blueprint.route('/reset_transaction_data', methods=['DELETE'])
+@login_required
 def reset_transaction_data():
     pause_job_running(remove_scheduler_jobs=False)
     wait_done_jobs()
@@ -1708,6 +1920,8 @@ def reset_transaction_data():
         clear_db_n_data()
         # reset_is_show_file_name()
         clear_cache()
+        # remove all pulled data
+        delete_pulled_data_folders(CfgProcess.get_all_ids())
         logger.debug('Done "TRANSACTION_CLEAN"')
 
         data = {'message': _('Transaction data is deleted.'), 'is_error': False}
@@ -1715,11 +1929,11 @@ def reset_transaction_data():
         logger.exception(e)
         data = {'message': _('Transaction data is deleted.'), 'is_error': True}
         http_status = 500
-    finally:
-        scheduler.resume()
-        resume_event_queue()
-        EventQueue.put(EventBackgroundAnnounce(data=data, event=AnnounceEvent.CLEAR_TRANSACTION_DATA))
-        return {}, http_status
+
+    scheduler.resume()
+    resume_event_queue()
+    EventQueue.put(EventBackgroundAnnounce(data=data, event=AnnounceEvent.CLEAR_TRANSACTION_DATA))
+    return {}, http_status
 
 
 @api_setting_module_blueprint.route('/import_filters/<process_id>', methods=['GET'])
@@ -1730,3 +1944,22 @@ def get_import_filter_from_process(process_id):
         return orjson_dumps(data=import_filters), 200
 
     return {}, 404
+
+
+@api_setting_module_blueprint.route('/preview_software_workshop', methods=['POST'])
+def preview_software_workshop():
+    params = DbConnectionParam.model_validate(json.loads(request.data).get('db'))
+    connection_result = None
+    try:
+        connection_result = check_db_con(params)
+    except Exception as e:
+        logger.exception(e)
+
+    if connection_result:
+        message = {'db_type': params.db_type, 'message': _('Connected'), 'connected': True}
+    else:
+        message = {'db_type': params.db_type, 'message': _('Failed to connect'), 'connected': False}
+        return jsonify(db_info=[], flask_message=message), 200
+
+    output = get_line_grp_info(params)
+    return jsonify(db_info=output, flask_message=message), 200

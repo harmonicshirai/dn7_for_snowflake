@@ -149,14 +149,14 @@
         ],
         "css": ["scatter_plot/css/scatter_plot.css"]
     },
-    "tv": {
+    "wfp": {
         "js": [
             "common/js/ap_plot.js",
-            "time_vis/js/time_vis_plot.js",
-            "time_vis/js/time_vis.js",
+            "waveform_plot/js/waveform.js",
+            "waveform_plot/js/waveform_plot.js",
             "common/js/cat_facet_label_filter_modal.js"
         ],
-        "css": ["time_vis/css/time_vis.css"]
+        "css": ["waveform_plot/css/waveform_plot.css"]
     },
     "hmp": {
         "js": [

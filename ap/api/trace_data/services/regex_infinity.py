@@ -65,7 +65,7 @@ def validate_numeric_minus(df: DataFrame, col_name, return_vals):
         return df
 
     # minimum values higher than 0, skip
-    if df[col_name].min() >= num:
+    if df[~np.isnan(df[col_name])][col_name].min() >= num:
         return df
 
     # return_vals = [pd.NA, pd.NA]
@@ -83,7 +83,7 @@ def validate_numeric_plus(df: DataFrame, col_name, return_vals):
         return df
 
     # maximum value less than 0, skip
-    if df[col_name].max() < num:
+    if df[~np.isnan(df[col_name])][col_name].max() < num:
         return df
 
     # return_vals = [pd.NA, pd.NA, pd.NA]
@@ -240,7 +240,4 @@ def check_validate_target_column(col: str):
     if col in EXCLUDE_COLS:
         return False
 
-    if col.startswith(TIME_COL):
-        return False
-
-    return True
+    return not col.startswith(TIME_COL)

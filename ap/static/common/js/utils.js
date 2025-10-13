@@ -16,7 +16,16 @@ const JUDGE_PATTERN_VALIDATION = /^Pos~([^|]+)\|Neg=([^|]+)\|([^|]+)$/;
 const TAB_CHAR = '\t';
 const NEW_LINE_CHAR = '\n';
 
-let xhr = null;
+/**
+ * @typedef {XMLHttpRequest} CustomXMLHttpRequest
+ * @property {string} thread_id - is used to identify the thread that the request is associated with.
+ */
+/**
+ * A jQuery XMLHttpRequest (jqXHR) object to interact with servers.
+ * @see \`{@link https://api.jquery.com/jquery.ajax/#jqXHR }\`
+ * @type {CustomXMLHttpRequest| null}
+ */
+let xmlHttpRequest = null;
 const SQL_LIMIT = 50000;
 let dataSetID = null;
 let $closeAllToast = null;
@@ -1673,7 +1682,7 @@ const getChartInfo = (plotdata, xAxisOption = 'TIME', filterCond = null) => {
         let isFacetHasFilterConditionValue = false;
         for (const facet of filterCond) {
             for (const chartInfo of [...chartInfos, ...chartInfosOrg]) {
-                if (chartInfo.name && facet === chartInfo.name) {
+                if (!_.isEmpty(chartInfo.name) && facet === chartInfo.value) {
                     isFacetHasFilterConditionValue = true;
                     break;
                 }
@@ -1685,10 +1694,10 @@ const getChartInfo = (plotdata, xAxisOption = 'TIME', filterCond = null) => {
         }
 
         chartInfos = chartInfos.filter((settingInfo) =>
-            settingInfo.name ? filterCond.includes(settingInfo.name) : true,
+            !_.isEmpty(settingInfo.name) ? filterCond.includes(settingInfo.value) : true,
         );
         chartInfosOrg = chartInfosOrg.filter((settingInfo) =>
-            settingInfo.name ? filterCond.includes(settingInfo.name) : true,
+            !_.isEmpty(settingInfo.name) ? filterCond.includes(settingInfo.value) : true,
         );
     }
 
@@ -1888,8 +1897,8 @@ const setSelect2Selection = (parent = null, additionalOption = {}, optionsLoadLa
         if (isEndProcProcessSelectBox(this)) {
             sortSpan = `<div style="position:absolute; top: 20px; right: 4px;">
                         <span style="font-size:16px" class="mr-1 sortCol select2-sort-icon" title="Sort">
-                            <i class="fa fa-sm fa-play asc"></i>
-                            <i class="fa fa-sm fa-play desc"></i>
+                           <svg class="svg-inline--fa fa-play fa-sm asc" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="play" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-fa-i2svg=""><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"></path></svg> 
+                           <svg class="svg-inline--fa fa-play fa-sm desc" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="play" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-fa-i2svg=""><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"></path></svg> 
                         </span>
                     </div>`;
         }
@@ -2359,6 +2368,9 @@ const endProcMultiSelectOnChange = async (count, props) => {
         return;
     }
 
+    // update proc filters
+    await procInfo.updateFilters();
+
     const ids = [];
     const vals = [];
     const names = [];
@@ -2477,6 +2489,7 @@ const endProcMultiSelectOnChange = async (count, props) => {
     checkIfProcessesAreLinked();
     initSortIcon('ul.list-group');
     checkShowingWarningMessageForUpdatingMainSerialInShowGraph(procId).then();
+    addFilterProcessByProcessId(procId);
 };
 
 const endProcessProps = {
@@ -2890,18 +2903,44 @@ const handleShowAbortModal = () => {
     $('.loadingoverlay').css({ zIndex: 9999 });
 };
 
+/**
+ * Aborts the current process initiated with an XMLHttpRequest.
+ *
+ * The function sends an AJAX GET request to the specified endpoint to notify the backend
+ * about the process abortion. It then terminates the ongoing XMLHttpRequest by calling
+ * its `abort()` method and clears the `xmlHttpRequest` reference.
+ *
+ * Preconditions:
+ * - The variable `xmlHttpRequest` must be defined and initialized with an active request.
+ *
+ * Behavior:
+ * - Sends a notification to the backend via the `/ap/api/common/abort_process` endpoint,
+ *   passing the `thread_id` of the current request.
+ * - Cancels the ongoing XMLHttpRequest to free up resources and prevent further processing.
+ * - Sets `xmlHttpRequest` to `null` after aborting the process.
+ */
 const abortProcess = () => {
-    if (xhr) {
+    if (xmlHttpRequest) {
         $.ajax({
             url: '/ap/api/common/abort_process',
             method: 'GET',
             data: {
-                thread_id: xhr.thread_id,
+                thread_id: xmlHttpRequest.thread_id,
             },
         });
-        xhr.abort();
-        xhr = null;
+        xmlHttpRequest.abort();
+        xmlHttpRequest = null;
     }
+};
+
+/**
+ * Set thread id into XMLHttpRequest to determine whether the request is aborted
+ * @param {CustomXMLHttpRequest} xhr
+ */
+const setThreadIDtoXMLHttpRequest = (xhr) => {
+    const threadID = makeUID();
+    xmlHttpRequest = xhr;
+    xmlHttpRequest.thread_id = threadID;
 };
 
 class GraphStore {
@@ -3887,8 +3926,9 @@ const genInfoTableBody = (traceDat) => {
 };
 
 const copyDataPointInfo = (ele) => {
+    const btnId = ele.id;
     $('#dp-info-content').removeClass('dp-opacity').addClass('dp-opacity');
-    const clipboard = new ClipboardJS('#dp-info-table-copy');
+    const clipboard = new ClipboardJS(`#${btnId}`);
     clipboard.on('success', (e) => {
         setTooltip(e.trigger, 'Copied!');
     });
@@ -4252,6 +4292,7 @@ const fetchData = async (url, data, method = 'GET', options = {}) => {
     return new Promise((resolve, reject) => {
         $.ajax({
             ...requestContent,
+            beforeSend: setThreadIDtoXMLHttpRequest,
             success: (res) => {
                 if (typeof res === 'string') {
                     resolve(JSON.parse(res));
@@ -4272,8 +4313,8 @@ const makeUID = () => {
 
 const handleBeforeSendRequestToShowGraph = (jqXHR, formdata) => {
     const threadID = makeUID();
-    xhr = jqXHR;
-    xhr.thread_id = threadID;
+    xmlHttpRequest = jqXHR;
+    xmlHttpRequest.thread_id = threadID;
     formdata.set('thread_id', threadID);
     const jumpId = getParamFromUrl('jump_key');
     const objectiveVar = getParamFromUrl('objective_var');
@@ -5858,3 +5899,111 @@ const scrollToEle = (eleID) => {
     const elePosition = getOffsetTopDisplayGraph(`#${eleID}`);
     $('html,body').animate({ scrollTop: elePosition }, 1000);
 };
+
+/**
+ *  check and show filter dropdown by process ID
+ * @param {number} processId
+ */
+const addFilterProcessByProcessId = (processId) => {
+    // check this process has filter config?
+    const filterCfg = procConfigs[processId].getFilters();
+    if (filterCfg.length === 0) return;
+
+    // check this process is showing filter
+    const showingFilterProcessList = getShowingFilterProcess();
+    if (showingFilterProcessList.includes(Number(processId))) return;
+
+    // show filter dropdown
+    // check if empty dropdown is shown
+    const selectName = 'select[name*=cond_proc]';
+
+    let parentCondCardDivs = getEmptyCondCard(selectName);
+
+    if (!parentCondCardDivs.length) {
+        // add by trigger click add button
+        [...$('button[name=btnAddCondProc]')].forEach((el) => $(el).trigger('click'));
+    }
+
+    setTimeout(() => {
+        parentCondCardDivs = getEmptyCondCard(selectName);
+        parentCondCardDivs.forEach((el) => {
+            $(el).find(selectName).val(processId).trigger('change');
+        });
+    }, 1000);
+};
+
+/**
+ *  Get the element that shown in GUI but that's not select value (then empty card)
+ * @param selectName
+ * @return {Array} or list of Element of filter process Div
+ */
+
+const getEmptyCondCard = (selectName) => {
+    let parentDivs = [];
+    const condCard = $('.cond-proc');
+    condCard.each((i, el) => {
+        const selectedVal = $(el).find(selectName).val();
+        if (!selectedVal) {
+            parentDivs.push($(el));
+        }
+    });
+    return parentDivs;
+};
+
+/**
+ * get the list of process id that shown in filter drop down GUI
+ * @return {number[]}
+ */
+
+const getShowingFilterProcess = () => {
+    return [...$('select[name*=cond_proc]')].map((el) => Number($(el).val()));
+};
+function getCellTextWidth(text) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    const metrics = context.measureText(text);
+    return metrics.width;
+}
+
+class zIndexModals {
+    static #waitStackZIndexes = [];
+    static #doneStackZIndexes = [];
+    static #zIndexHandling = () => {
+        const baseZIndexes = 1040; // default zindex for first modal = 1040
+        const increaseZIndex = 10;
+        let lastBackdropZIndex = 0;
+        let lastModalZIndex = 0;
+
+        document.querySelectorAll('.modal-backdrop').forEach((divEl) => {
+            lastBackdropZIndex += lastBackdropZIndex === 0 ? baseZIndexes : increaseZIndex;
+            divEl.style.zIndex = lastBackdropZIndex - 1;
+        });
+
+        [...document.querySelectorAll('.modal.fade.show'), ...zIndexModals.#doneStackZIndexes].forEach((divEl) => {
+            lastModalZIndex += lastModalZIndex === 0 ? baseZIndexes : increaseZIndex;
+            divEl.style.zIndex = lastModalZIndex;
+        });
+    };
+    static handle = (e) => {
+        zIndexModals.#waitStackZIndexes.push(e.currentTarget);
+        if (zIndexModals.handle.timeoutID == null && zIndexModals.#waitStackZIndexes.length > 0) {
+            zIndexModals.handle.timeoutID = setTimeout(() => {
+                while (zIndexModals.#waitStackZIndexes.length > 0) {
+                    e = zIndexModals.#waitStackZIndexes.pop();
+                    zIndexModals.#doneStackZIndexes.push(e);
+                    zIndexModals.#zIndexHandling(e);
+                }
+                while (zIndexModals.#doneStackZIndexes.length > 0) {
+                    zIndexModals.#doneStackZIndexes.pop();
+                }
+                zIndexModals.handle.timeoutID = null;
+            }, 0);
+        }
+    };
+
+    static setModalOverlay() {
+        // Multiple modal
+        $(document).on('show.bs.modal', '.modal', zIndexModals.handle);
+        $(document).on('hidden.bs.modal', '.modal', zIndexModals.handle);
+    }
+}

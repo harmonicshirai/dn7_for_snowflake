@@ -61,7 +61,11 @@
                                 >
                                     <i class="fa fa-file-import"></i>
                                 </button>
-                                <button name="configRegister" class="btn btn-primary btn-right" type="button">
+                                <button
+                                    name="configRegister"
+                                    class="btn btn-primary btn-right {% if not is_authorized %}disabled{% endif %}"
+                                    type="button"
+                                >
                                     <i class="far fa-save"></i>
                                     {{ _("Register") }}
                                 </button>

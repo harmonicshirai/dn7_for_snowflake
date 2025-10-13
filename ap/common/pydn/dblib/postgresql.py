@@ -3,22 +3,23 @@
 # Author: Masato Yasuda (2018/01/04)
 
 import logging
+from typing import Union
 
 import psycopg2
 import psycopg2.extras
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql import Select
 
-from ap.common.common_utils import strip_all_quote
+from ap.common.common_utils import convert_sa_sql_to_sa_str, handle_read_only, strip_all_quote
 from ap.common.logger import log_execution_time
 
 logger = logging.getLogger(__name__)
 
 
 class PostgreSQL:
-    def __init__(self, host, dbname, username, password):
+    def __init__(self, host, dbname, username, password, port=5432, read_only=False):
         self.host = host
-        self.port = 5432
+        self.port = port
         self.dbname = dbname
         # postgresqlはdbの下にschemaという概念がある。
         # http://d.hatena.ne.jp/sheeg/20070906/1189083744
@@ -27,6 +28,7 @@ class PostgreSQL:
         self.password = password
         self.is_connected = False
         self.connection = None
+        self.read_only = read_only
 
     def dump(self):
         logger.info(
@@ -242,7 +244,9 @@ self.is_connected: {self.is_connected}
     # cols, rows = db1.run_sql("select * from tbl01")
     # という形で呼び出す
     @log_execution_time('POSTGRES')
-    def run_sql(self, sql, row_is_dict=True, params=None):
+    @convert_sa_sql_to_sa_str
+    @handle_read_only()
+    def run_sql(self, sql: str, row_is_dict=True, params=None):
         if not self._check_connection():
             return False
         cur = self.connection.cursor()
@@ -262,6 +266,8 @@ self.is_connected: {self.is_connected}
         cur.close()
         return cols, rows
 
+    @convert_sa_sql_to_sa_str
+    @handle_read_only()
     def fetch_many(self, sql, size=10_000, params=None):
         if not self._check_connection():
             return False
@@ -316,12 +322,9 @@ self.is_connected: {self.is_connected}
     def is_timezone_hold_column(self, tbl, col):
         data_type = self.get_data_type_by_colname(tbl, col)
 
-        if 'WITH TIME ZONE' in data_type.upper():
-            return True
-
-        return False
+        return 'WITH TIME ZONE' in data_type.upper()
 
     @staticmethod
-    def gen_sql_and_params(stmt: Select) -> tuple[str, dict[str, str]]:
-        compiled_stmt = stmt.compile(dialect=postgresql.dialect())
+    def gen_sql_and_params(stmt: Union[sa.Select, sa.TextClause]) -> tuple[str, dict[str, str]]:
+        compiled_stmt = stmt.compile(dialect=postgresql.dialect(), compile_kwargs={'render_postcompile': True})
         return compiled_stmt.string, compiled_stmt.params

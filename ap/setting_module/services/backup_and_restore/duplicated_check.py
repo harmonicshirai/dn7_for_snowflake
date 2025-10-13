@@ -49,9 +49,7 @@ def remove_unused_columns_and_add_missing_columns(
 def get_drop_duplicated_columns(transaction_data: TransactionData) -> list[str]:
     def is_good_column(column: CfgProcessColumn) -> bool:
         # do not include function column
-        if column.function_details:
-            return False
-        return True
+        return not column.function_details
 
     good_columns = [col.bridge_column_name for col in filter(is_good_column, transaction_data.cfg_process_columns)]
 

@@ -12,13 +12,16 @@
     <div class="modal-dialog modal-xl" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h4 class="modal-title" id="CSVSelectedLabel">{{ _("CSV Import Config") }}</h4>
+                <div class="col-md">
+                    <h4 class="modal-title" id="CSVSelectedLabel">{{ _("CSV Import Config") }}</h4>
+                </div>
+                {{ macros.polling_frequency_option('CSV', polling_frequency, is_authorized) }}
                 <button type="button" class="close" aria-label="Close" onclick="handleCloseDSConfigModal(this)">
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
             <div class="modal-body">
-                <div class="form-group row">
+                <div class="form-group row mb-0">
                     <div class="col-sm-12">
                         {{ macros.alert_message("alertMsgCheckFolder") }}
                         {{ macros.alert_message("alertInternalError") }}
@@ -242,6 +245,9 @@
                     class="btn btn-secondary saveDBInfoBtn"
                     data-csv="1"
                     data-item-id=""
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -289,9 +295,10 @@
                         {{ _("Config") }}: <span id="DBTypeModal">SQLite</span>
                     </h4>
                 </div>
+                {{ macros.polling_frequency_option('SQLITE', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -353,6 +360,9 @@
                     class="btn btn-primary saveDBInfoBtn"
                     data-item-id=""
                     data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -380,9 +390,10 @@
                 <div class="col-md">
                     <h4 class="modal-title" id="MSSQLSelectedLabel">{{ _("Config") }}: MSSQL Server</h4>
                 </div>
+                {{ macros.polling_frequency_option('MSSQLSERVER', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -425,6 +436,9 @@
                     data-item-id=""
                     onclick="saveDBInfo(this);"
                     data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -450,9 +464,10 @@
                 <div class="col-md">
                     <h4 class="modal-title">{{ _("Config") }}: PostgreSQL</h4>
                 </div>
+                {{ macros.polling_frequency_option('POSTGRESQL', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -497,6 +512,9 @@
                     class="btn btn-primary saveDBInfoBtn"
                     data-item-id=""
                     data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -525,9 +543,10 @@
                 <div class="col-md">
                     <h4 class="modal-title" id="OracleSelectedLabel">{{ _("Config") }}: Oracle</h4>
                 </div>
+                {{ macros.polling_frequency_option('ORACLE', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -568,6 +587,9 @@
                     data-item-id=""
                     onclick="saveDBInfo(this);"
                     data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -595,9 +617,10 @@
                 <div class="col-md">
                     <h4 class="modal-title" id="MySQLSelectedLabel">{{ _("Config") }}: MySQL</h4>
                 </div>
+                {{ macros.polling_frequency_option('MYSQL', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -638,6 +661,9 @@
                     data-item-id=""
                     onclick="saveDBInfo(this);"
                     data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
                 >
                     {{ _("OK") }}
                 </button>
@@ -652,21 +678,22 @@
 <!-- SOFTWARE WORKSHOP -->
 <div
     class="modal fade db-modal"
-    id="modal-db-software_workshop"
+    id="modal-db-postgres_software_workshop"
     tabindex="-1"
     role="dialog"
     data-backdrop="static"
     data-keyboard="false"
 >
-    <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-dialog" role="document" style="max-width: 910px">
         <div class="modal-content">
             <div class="modal-header">
                 <div class="col-md">
-                    <h4 class="modal-title">{{ _("Config") }}: {{ _("Software Workshop Postgres") }}</h4>
+                    <h4 class="modal-title">{{ _("Config") }}: {{ _("Software Workshop (on-premise)") }}</h4>
                 </div>
+                {{ macros.polling_frequency_option('POSTGRES_SOFTWARE_WORKSHOP', polling_frequency, is_authorized) }}
                 <button
                     type="button"
-                    class="btn btn-outline-secondary"
+                    class="btn btn-outline-secondary ml-2"
                     data-toggle="modal"
                     data-target="#advancedDSModal"
                 >
@@ -676,43 +703,230 @@
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
-            <div class="modal-body" name="modal-body-input">
-                {{ macros.alert_message("alert-software_workshop-validation") }}
-                <form id="softwareWorkshopCfgForm">
-                    {{ macros.input_row("software_workshop_dbsourcename", _("Data Source Name")) }}
-
-                    {{ macros.input_row("software_workshop_comment", _("Comment")) }}
-
-                    {{ macros.input_row("software_workshop_host", _("Host name") + " (" + _("IP Address") + ")") }}
-
-                    {{ macros.input_row("software_workshop_port", _("Port number"), value='5432') }}
-
-                    {{ macros.input_row("software_workshop_dbname", _("Database Name")) }}
-
-                    {{ macros.input_row("software_workshop_schema", _("Schema"), value='public') }}
-
-                    {{ macros.input_row("software_workshop_username", _("User name")) }}
-
-                    {{ macros.input_row("software_workshop_password", _("Password"), type='password') }}
-
-                    {{ macros.input_hidden("software_workshop_use_os_timezone", "", "software_workshop_use_os_timezone") }}
-
-                    {{ macros.input_hidden("software_workshop_id", "", "software_workshop_id") }}
-                </form>
+            <div class="modal-body h-100" name="modal-body-input">
+                {{ macros.alert_message("alert-postgres_software_workshop-validation") }}
+                <div class="d-flex align-items-end">
+                    <form id="softwareWorkshopCfgForm" class="mr-2 mb-2">
+                        {{ macros.input_row("postgres_software_workshop_dbsourcename", _("Data Source Name"), label_block_cnt=4, input_block_cnt=8) }}
+                        {{ macros.input_row("postgres_software_workshop_comment", _("Comment"), label_block_cnt=4, input_block_cnt=8) }}
+                        <div class="d-flex flex-row justify-content-between">
+                            <div class="">
+                                {{ macros.input_row("postgres_software_workshop_host", _("Host name") + " (" + _("IP Address") + ")", label_block_cnt=7, input_block_cnt=5) }}
+                                {{ macros.input_row("postgres_software_workshop_dbname", _("Database Name"), label_block_cnt=7, input_block_cnt=5) }}
+                                {{ macros.input_row("postgres_software_workshop_username", _("User name"), label_block_cnt=7, input_block_cnt=5) }}
+                            </div>
+                            <div class="">
+                                {{ macros.input_row("postgres_software_workshop_port", _("Port number"), value='5432', label_block_cnt=5, input_block_cnt=7) }}
+                                {{ macros.input_row("postgres_software_workshop_schema", _("Schema"), value='public', label_block_cnt=5, input_block_cnt=7) }}
+                                {{ macros.input_row("postgres_software_workshop_password", _("Password"), type='password', label_block_cnt=5, input_block_cnt=7) }}
+                            </div>
+                        </div>
+                        {{ macros.input_hidden("postgres_software_workshop_use_os_timezone", "", "postgres_software_workshop_use_os_timezone") }}
+                        {{ macros.input_hidden("postgres_software_workshop_id", "", "postgres_software_workshop_id") }}
+                    </form>
+                    <div
+                        class="d-flex flex-wrap flex-column align-items-center position-relative"
+                        style="margin-bottom: 1.1rem;"
+                    >
+                        {{ macros.preview_software_workshop('postgres_software_workshop', '#modal-db-postgres_software_workshop div[name="modal-body-input"]', 'btn-test-db-conn-postgres_software_workshop', 'msg-test-db-conn-postgres_software_workshop') }}
+                    </div>
+                </div>
+                <div id="lineGroupContainer" style="display: none">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1" style="margin-right: 0.7rem !important">
+                            {{ macros.single_selectbox('lineGrps',_("softwareWorkshopPreviewLineGrpLabel"),{},1,4,8, multiple_cols=false) }}
+                        </div>
+                        <div style="width: 125px"></div>
+                    </div>
+                    <div class="d-flex align-items-start justify-content-center">
+                        <label style="white-space: pre; padding: 5px 15px 5px"
+                            >{{ _('softwareWorkshopPreviewChildEqLabel') }}</label
+                        >
+                        <div id="groupTable"></div>
+                    </div>
+                </div>
             </div>
-
             <div class="modal-footer">
-                {{ macros.check_db_connection_message('software_workshop', '#modal-db-software_workshop div[name="modal-body-input"]', 'btn-test-db-conn-software_workshop', 'msg-test-db-conn-software_workshop') }}
-
                 <button
                     id=""
                     type="button"
-                    onclick="saveDBInfo(this);"
+                    onclick="saveDBInfo()"
+                    class="btn btn-primary saveDBInfoBtn"
+                    data-item-id=""
+                    data-submit-btn="true"
+                    {% if not is_authorized %}
+                        disabled
+                    {% endif %}
+                >
+                    {{ _("OK") }}
+                </button>
+                <button
+                    id=""
+                    type="button"
+                    onclick="showSoftwareWorkshopConfirmationModal();"
+                    class="btn btn-primary saveDBInfoBtn"
+                    data-item-id=""
+                    data-submit-btn="true"
+                >
+                    {{ _("registerProcessButton") }}
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="handleCloseDSConfigModal(this);">
+                    {{ _("Cancel") }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% include 'db_modals/snowflake.html' %}
+<!-- SNOWFLAKE SOFTWARE WORKSHOP -->
+<div
+    class="modal fade db-modal"
+    id="modal-db-snowflake_software_workshop"
+    tabindex="-1"
+    role="dialog"
+    data-backdrop="static"
+    data-keyboard="false"
+>
+    <div class="modal-dialog modal-snowflake" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="col-md">
+                    <h4 class="modal-title">{{ _("Config") }}: {{ _("DataSourceTypeSoftwareWorkshopSnowflake") }}</h4>
+                </div>
+                {{ macros.polling_frequency_option('SNOWFLAKE_SOFTWARE_WORKSHOP', polling_frequency, is_authorized, [0, 60, 1440]) }}
+                <button
+                    type="button"
+                    class="btn btn-outline-secondary ml-2"
+                    data-toggle="modal"
+                    data-target="#advancedDSModal"
+                >
+                    Advanced
+                </button>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body h-100" name="modal-body-input">
+                {{ macros.alert_message("alert-snowflake_software_workshop-validation") }}
+                <div class="d-flex align-items-end">
+                    <form id="snowflakeSWCfgForm" class="mr-2 mb-2 flex-grow-1">
+                        {{ macros.input_row("snowflake_software_workshop_dbsourcename", _("Data Source Name"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                        {{ macros.input_row("snowflake_software_workshop_comment", _("Comment"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                        {{ macros.input_row("snowflake_software_workshop_pull_from", _("Import From (UTC)"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0', id="snowflake_software_workshop_pull_from", placeholder="YYYY-MM-DD") }}
+                        <div class="d-flex flex-row justify-content-end">
+                            <div class="flex-grow-1">
+                                {{ macros.input_row("snowflake_software_workshop_host", _("Host name") + " (" + _("IP Address") + ")", label_block_cnt=7, input_block_cnt=5, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_dbname", _("Database Name"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_username", _("User name"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_role", _("RoleLabel"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                            </div>
+                            <div class="flex-grow-1">
+                                {{ macros.input_row("snowflake_software_workshop_port", _("Port number"), value='5432', label_block_cnt=5, input_block_cnt=7, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_schema", _("Schema"), value='public', label_block_cnt=5, input_block_cnt=7, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_warehouse", _("WarehouseLabel"), label_block_cnt=5, input_block_cnt=7,label_class='p-0') }}
+                            </div>
+                            {{ macros.input_hidden("snowflake_software_workshop_id", "", "snowflake_software_workshop_id") }}
+                        </div>
+                        <div class="form-group row">
+                            <label class="col-sm-4 col-form-label label-right"
+                                ><h5>{{ _("SnowflakeAuthTypeLabel") }}</h5></label
+                            >
+                            <div class="col-sm-8 pl-0">
+                                <div class="custom-control custom-radio custom-control-inline">
+                                    <input
+                                        type="radio"
+                                        class="custom-control-input"
+                                        id="snowflakeSWAuthAccessToken"
+                                        name="snowflakeSWAuthType"
+                                        value="access_token"
+                                        onchange="switchAuthTypeDisplay(this, 'SNOWFLAKE_SOFTWARE_WORKSHOP')"
+                                        data-observer
+                                    />
+                                    <label class="custom-control-label" for="snowflakeSWAuthAccessToken"
+                                        >{{ _("AccessTokenRadioLabel") }}</label
+                                    >
+                                    <a
+                                        class="ml-2"
+                                        target="_blank"
+                                        href="https://docs.snowflake.com/en/user-guide/programmatic-access-tokens#generating-a-programmatic-access-token"
+                                        ><i class="fa fa-external-link-alt"></i
+                                    ></a>
+                                </div>
+                                <div class="custom-control custom-radio custom-control-inline">
+                                    <input
+                                        type="radio"
+                                        class="custom-control-input"
+                                        id="snowflakeSWAuthKeypair"
+                                        name="snowflakeSWAuthType"
+                                        value="keypair"
+                                        onchange="switchAuthTypeDisplay(this, 'SNOWFLAKE_SOFTWARE_WORKSHOP')"
+                                        data-observer
+                                    />
+                                    <label class="custom-control-label" for="snowflakeSWAuthKeypair"
+                                        >{{ _("KeypairRadioLabel") }}</label
+                                    >
+                                    <a
+                                        class="ml-2"
+                                        target="_blank"
+                                        href="https://docs.snowflake.com/en/user-guide/key-pair-auth#configuring-key-pair-authentication"
+                                        ><i class="fa fa-external-link-alt"></i
+                                    ></a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex">
+                            <div id="inputSWAreaAccessTokenType" class="flex-grow-1" style="display: block;">
+                                {{ macros.input_row("snowflake_software_workshop_access_token", _("SnowflakeAccessTokenLabel"), type='password', label_block_cnt=4, input_block_cnt=8, margin_bottom_class='mb-0', input_class='pl-0') }}
+                            </div>
+                            <div id="inputSWAreaKeypairType" class="flex-column flex-grow-1" style="display: none;">
+                                {{ macros.input_row("snowflake_software_workshop_private_key_file", _("SnowflakePrivateKeyFilePathLabel"), value='', label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                                {{ macros.input_row("snowflake_software_workshop_private_key_file_pwd", _("SnowflakePrivateKeyFilePwdLabel"), type='password', label_block_cnt=4, input_block_cnt=8, margin_bottom_class='mb-0', input_class='pl-0') }}
+                            </div>
+                        </div>
+                        {{ macros.input_hidden("snowflake_software_workshop_use_os_timezone", "", "snowflake_software_workshop_use_os_timezone") }}
+                    </form>
+                    <div
+                        class="d-flex flex-wrap flex-column align-items-center position-relative"
+                        style="margin-bottom: 8px;"
+                    >
+                        {{ macros.preview_software_workshop('snowflake_software_workshop', '#modal-db-snowflake_software_workshop div[name="modal-body-input"]', 'btn-test-db-conn-snowflake_software_workshop', 'msg-test-db-conn-snowflake_software_workshop') }}
+                    </div>
+                </div>
+                <div id="lineGroupContainer" style="display: none">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1" style="margin-right: 0.7rem !important">
+                            {{ macros.single_selectbox('lineGrps',_("softwareWorkshopPreviewLineGrpLabel"),{},1,4,8, multiple_cols=false) }}
+                        </div>
+                        <div style="width: 125px"></div>
+                    </div>
+                    <div class="d-flex align-items-start justify-content-center">
+                        <label style="white-space: pre; padding: 5px 15px 5px"
+                            >{{ _('softwareWorkshopPreviewChildEqLabel') }}</label
+                        >
+                        <div id="groupTable"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    id=""
+                    type="button"
+                    onclick="saveDBInfo()"
                     class="btn btn-primary saveDBInfoBtn"
                     data-item-id=""
                     data-submit-btn="true"
                 >
                     {{ _("OK") }}
+                </button>
+                <button
+                    id=""
+                    type="button"
+                    onclick="showSoftwareWorkshopConfirmationModal();"
+                    class="btn btn-primary saveDBInfoBtn"
+                    data-item-id=""
+                    data-submit-btn="true"
+                >
+                    {{ _("registerProcessButton") }}
                 </button>
                 <button type="button" class="btn btn-secondary" onclick="handleCloseDSConfigModal(this)">
                     {{ _("Cancel") }}

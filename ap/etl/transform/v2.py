@@ -1,0 +1,357 @@
+import itertools
+import logging
+import uuid
+from typing import Optional
+
+import pandas as pd
+
+from ap.common.constants import BaseEnum
+from ap.etl.transform import BaseTransformer, TransformData
+
+logger = logging.getLogger(__name__)
+
+
+class BaseNameColumns(BaseEnum):
+    PREFIX = 'Sub'
+    PART = 'Part'
+    LOT = 'Lot'
+    TRAY = 'Tray'
+    SERIAL = 'Serial'
+
+
+class SubColumns(BaseEnum):
+    SUB_PART_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.PART.value}'
+    SUB_LOT_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.LOT.value}'
+    SUB_TRAY_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.TRAY.value}'
+    SUB_SERIAL_NO_PATTERN = f'{BaseNameColumns.PREFIX.value}{"{}"}{BaseNameColumns.SERIAL.value}'
+
+
+class V2MeasurementTransformer(BaseTransformer):
+    """Transformer for converting v2 vertical data to horizontal data"""
+
+    def __init__(
+        self,
+        master_columns: list[str],
+        index_columns: list[str],
+        horizontal_columns: list[str],
+        name_column: str,
+        value_column: str,
+        unit_column: str,
+    ):
+        self.master_columns = master_columns
+        self.index_columns = index_columns
+        self.horizontal_columns = horizontal_columns
+        self.name_column = name_column
+        self.value_column = value_column
+        self.unit_column = unit_column
+
+    def transform(self, data: TransformData) -> TransformData:
+        """Transforming vertical data to horizontal data
+
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         'master': ['m1', 'm1', 'm2', 'm2'],
+        ...         'horizon': ['h', 'h', 'h', 'h'],
+        ...         'index': [1, 1, 2, 2],
+        ...         'name': ['a', 'b', 'a', 'b'],
+        ...         'value': [1, 2, 3, 4],
+        ...         'unit': ['x', 'y', 'x', 'y'],
+        ...     }
+        ... )
+        >>> df
+          master horizon  index name  value unit
+        0     m1       h      1    a      1    x
+        1     m1       h      1    b      2    y
+        2     m2       h      2    a      3    x
+        3     m2       h      2    b      4    y
+        >>> transformer = V2MeasurementTransformer(
+        ...     master_columns=['master'],
+        ...     index_columns=['index'],
+        ...     horizontal_columns=['horizon'],
+        ...     name_column='name',
+        ...     value_column='value',
+        ...     unit_column='unit',
+        ... )
+        >>> data = TransformData(df=df)
+        >>> transformed_data = transformer.transform(data)
+        >>> transformed_data.df
+          master  index horizon  a  b
+        0     m1      1       h  1  2
+        1     m2      2       h  3  4
+        >>> transformed_data.name_unit_mapping
+        {'a': 'x', 'b': 'y'}
+        """
+
+        df = data.df
+
+        # user provide unit column, we must construct a name-unit mapping before converting to horizontal data.
+        name_unit_mapping = data.name_unit_mapping.copy()
+        if self.unit_column is not None:
+            if self.unit_column in df.columns:
+                name_unit_mapping.update(
+                    df.dropna(subset=[self.unit_column])  # do not get unit column with NA
+                    .drop_duplicates(subset=[self.name_column])[
+                        [self.name_column, self.unit_column]
+                    ]  # only get unique code column
+                    .set_index(self.name_column)[self.unit_column]  # convert to dictionary
+                    .to_dict(),
+                )
+            else:
+                logger.error(f'{self.__class__}: unit column `{self.unit_column}` does not exist in dataframe')
+
+        # all required columns. We use this hack to preserve order
+        required_columns = list(dict.fromkeys([*self.master_columns, *self.index_columns, *self.horizontal_columns]))
+
+        df_pivot = (
+            # only select required columns, ignore unneeded ones
+            df[[*self.index_columns, self.name_column, self.value_column]]
+            # drop duplicated columns, to make sure pivot can work properly
+            .drop_duplicates(subset=[*self.index_columns, self.name_column], keep='last')
+            # FIXME: we drop column name with NA here, but we should probably use dummy name
+            # wait this: https://gitlab.com/dot-asterisk/biz-app/analysis-interface/analysisinterface/-/merge_requests/7025
+            .dropna(subset=self.name_column)
+            .pivot(index=self.index_columns, columns=self.name_column, values=self.value_column)
+            .reset_index()
+        )
+
+        # merge to get master data
+        df_with_master = df[required_columns].drop_duplicates(subset=self.index_columns, keep='last')
+        df_horizontal = df_pivot.merge(right=df_with_master, on=self.index_columns)
+
+        # sort vertical columns for better output, we don't want our data being shown as col_03 col_01 col_02
+        sorted_vertical_columns = sorted(c for c in df_horizontal.columns if c not in required_columns)
+        df_horizontal = df_horizontal[[*required_columns, *sorted_vertical_columns]]
+
+        return data.with_df(df_horizontal).with_name_unit_mapping(name_unit_mapping)
+
+
+class V2HistoryTransformer(BaseTransformer):
+    def __init__(
+        self,
+        index_columns: list[str],
+        sub_part_no_column: Optional[str] = None,
+        sub_lot_no_column: Optional[str] = None,
+        sub_tray_no_column: Optional[str] = None,
+        sub_serial_no_column: Optional[str] = None,
+    ):
+        # remove duplicates
+        self.index_columns = list(dict.fromkeys(index_columns))
+
+        # sub columns in vertical dataframe, for renaming
+        # this is also the ordered for sorting
+        self.sub_column_pattern = {
+            column: pattern
+            for column, pattern in (
+                (sub_part_no_column, SubColumns.SUB_PART_NO_PATTERN),
+                (sub_lot_no_column, SubColumns.SUB_LOT_NO_PATTERN),
+                (sub_tray_no_column, SubColumns.SUB_TRAY_NO_PATTERN),
+                (sub_serial_no_column, SubColumns.SUB_SERIAL_NO_PATTERN),
+            )
+            if column is not None
+        }
+
+    def transform(self, data: TransformData) -> TransformData:
+        """Transforming vertical data to horizontal data
+
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         'master': ['m1', 'm1', 'm2'],
+        ...         'index': [1, 1, 2],
+        ...         'normal': ['a', 'b', 'c'],
+        ...         'lot_no': ['l1', 'l2', 'l3'],
+        ...         'tray_no': ['t1', 't2', 't3'],
+        ...         'serial_no': ['s1', 's2', 's3']
+        ...     }
+        ... )
+        >>> df
+          master  index normal lot_no tray_no serial_no
+        0     m1      1      a     l1      t1        s1
+        1     m1      1      b     l2      t2        s2
+        2     m2      2      c     l3      t3        s3
+        >>> transformer = V2HistoryTransformer(
+        ...     index_columns=['master', 'index'],
+        ...     sub_part_no_column='part_no',
+        ...     sub_lot_no_column='lot_no',
+        ...     sub_tray_no_column='tray_no',
+        ...     sub_serial_no_column='serial_no',
+        ... )
+        >>> data = TransformData(df=df)
+        >>> transformed_data = transformer.transform(data)
+        >>> transformed_data.df.columns
+        Index(['master', 'index', 'normal', 'Sub1Part', 'Sub1Lot', 'Sub1Tray',
+               'Sub1Serial', 'Sub2Part', 'Sub2Lot', 'Sub2Tray', 'Sub2Serial'],
+              dtype='object')
+        >>> pd.options.display.max_columns = 20
+        >>> transformed_data.df # doctest: +NORMALIZE_WHITESPACE
+          master  index normal Sub1Part Sub1Lot Sub1Tray Sub1Serial Sub2Part Sub2Lot  \\
+        0     m1      1      a     <NA>      l1       t1         s1     <NA>      l2
+        1     m2      2      c     <NA>      l3       t3         s3     <NA>    <NA>
+        <BLANKLINE>
+          Sub2Tray Sub2Serial
+        0       t2         s2
+        1     <NA>       <NA>
+        """
+        df = data.df
+        if df.empty:
+            return data
+
+        # we want to retain normal columns untouched
+        normal_columns: list[str] = []
+        for column in df.columns:
+            if column not in self.index_columns and column not in self.sub_column_pattern:
+                normal_columns.append(column)
+
+        count_sub_rows = f'count_sub_{uuid.uuid4().hex}'
+        start_order = 1
+        # create count for sub columns per unique columns
+        # Use dropna=False. See: https://github.com/pandas-dev/pandas/issues/52814
+        df[count_sub_rows] = df.groupby(self.index_columns, dropna=False).cumcount() + start_order
+
+        df = (
+            # mark unique columns and sub rows as the same row in the new dataframe
+            df.set_index([*self.index_columns, count_sub_rows])
+            # unstack the last level (the `count_sub_rows`) to multiple index
+            .unstack()
+        )
+
+        df = self.add_sub_columns(df)
+        df = self.drop_duplicated_non_sub_columns(df)
+        df = self.sort_sub_columns(df)
+        df = self.rename_sub_columns(df)
+
+        # make sure all columns are string, avoiding pandas incorrectly casting them into object
+        df = df.astype(pd.StringDtype())
+
+        # move `self.index_columns` as index into the same level with other columns
+        df = df.reset_index()
+
+        return data.with_df(df)
+
+    def add_sub_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Find a defined pattern columns that does not exist in dataframe and add them to the dataframe.
+
+        Example: user defines `lot_no` but it doesn't exist in dataframe. Then new `lot_no` columns will also be added
+
+        >>> columns = [('normal', 1), ('part_no', 1), ('part_no', 2)]
+        >>> df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(columns))
+        >>> transformer = V2HistoryTransformer(
+        ...     index_columns=[],
+        ...     sub_part_no_column='part_no',
+        ...     sub_lot_no_column='lot_no',
+        ... )
+        >>> transformer.add_sub_columns(df)  # new (lot_no, 2) will be added
+        Empty DataFrame
+        Columns: [(normal, 1), (part_no, 1), (part_no, 2), (lot_no, 1), (lot_no, 2)]
+        Index: []
+        """
+
+        total_groups = max(order for _, order in df.columns)
+
+        df_columns = {column for column, _ in df.columns}
+        sub_columns = set(self.sub_column_pattern)
+        sub_column_in_df = set(self.sub_column_pattern) & df_columns
+        sub_column_not_in_df = sub_columns - sub_column_in_df
+
+        new_columns = list(itertools.product(sub_column_not_in_df, range(1, total_groups + 1)))
+        if new_columns:
+            df[new_columns] = None
+
+        return df
+
+    def drop_duplicated_non_sub_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove non-sub column pattern in dataframe. Because we incorrectly unstacked it
+
+        >>> columns = [('normal', 1), ('normal', 2), ('part_no', 1), ('part_no', 2)]
+        >>> df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(columns))
+        >>> transformer = V2HistoryTransformer(
+        ...     index_columns=[],
+        ...     sub_part_no_column='part_no',
+        ... )
+        >>> transformer.drop_duplicated_non_sub_columns(df)
+        Empty DataFrame
+        Columns: [(normal, 1), (part_no, 1), (part_no, 2)]
+        Index: []
+        """
+
+        found: set[str] = set()
+
+        # save columns, to avoid modifying dataframe inplace
+        columns: list[tuple[str, int]] = df.columns.tolist()
+        for column, order in columns:
+            # do not operate on sub columns
+            if column in self.sub_column_pattern:
+                continue
+
+            # drop duplicated columns
+            if column in found:
+                df = df.drop((column, order), axis=1)
+            found.add(column)
+
+        return df
+
+    def sort_sub_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Sort pandas columns, normal columns should have higher priority
+
+        >>> column_names = ['part', 'part', 'tray', 'tray', 'lot', 'lot', 'serial', 'serial', 'normal']
+        >>> column_orders = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1]
+        >>> columns = list(zip(column_names, column_orders))
+        >>> columns # doctest: +NORMALIZE_WHITESPACE
+        [('part', 1), ('part', 2), ('tray', 1), ('tray', 2), ('lot', 1), \
+        ('lot', 2), ('serial', 1), ('serial', 2), ('normal', 1)]
+        >>> df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(columns))
+        >>> transformer = V2HistoryTransformer(
+        ...     index_columns=[],
+        ...     sub_part_no_column='part',
+        ...     sub_lot_no_column='lot',
+        ...     sub_tray_no_column='tray',
+        ...     sub_serial_no_column='serial',
+        ... )
+        >>> transformer.sort_sub_columns(df)
+        Empty DataFrame
+        Columns: [(normal, 1), (part, 1), (lot, 1), (tray, 1), (serial, 1), (part, 2), (lot, 2), (tray, 2), (serial, 2)]
+        Index: []
+        """
+
+        normal_columns: list[tuple[str, int]] = [
+            (column, order) for column, order in df.columns if column if column not in self.sub_column_pattern
+        ]
+        sub_columns: list[tuple[str, int]] = [
+            (column, order) for column, order in df.columns if column if column in self.sub_column_pattern
+        ]
+        sub_column_keys = list(self.sub_column_pattern.keys())
+
+        def _sort_key(column: str, order: int) -> str:
+            return f'{order}_{sub_column_keys.index(column)}'
+
+        sorted_sub_columns = sorted(sub_columns, key=lambda c: _sort_key(c[0], c[1]))
+
+        return df[[*normal_columns, *sorted_sub_columns]]
+
+    def rename_sub_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rename dataframe with 2 levels into one level columns following sub column pattern
+
+        >>> columns = [('normal', 1), ('part_no', 1), ('lot_no', 2)]
+        >>> df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(columns))
+        >>> transformer = V2HistoryTransformer(
+        ...     index_columns=[],
+        ...     sub_part_no_column='part_no',
+        ...     sub_lot_no_column='lot_no',
+        ... )
+        >>> transformer.rename_sub_columns(df)
+        Empty DataFrame
+        Columns: [normal, Sub1Part, Sub2Lot]
+        Index: []
+
+        """
+
+        def _renamer(column_name: str, column_order: int) -> str:
+            # pattern columns should be renamed
+            if column_name in self.sub_column_pattern:
+                return self.sub_column_pattern[column_name].value.format(column_order)
+            # otherwise, this is normal column, since we drop duplicated, we can just return as is
+            return column_name
+
+        # rename sub column into correct sub column name
+        df.columns = df.columns.map(lambda c: _renamer(c[0], c[1]))
+
+        return df

@@ -974,6 +974,10 @@ class DataTypeDropdown_Helper extends DataTypeDropdown_Constant {
         const $judgeConfirmModal = $('#selectJudgeDataTypeConfirmModal');
         if (isFirstLoad || columnType !== masterDataGroup.JUDGE) return;
         const isJudgeAvailable = table.getCellByHeaderAndIndex(PROCESS_COLUMNS.judge_available, rowIndex).data;
+        if (typeof isInitialize !== 'undefined' && isInitialize) {
+            const $judgeFilterWarningModal = $('#selectJudgeDataTypeWarningFilterChangeModal');
+            $judgeFilterWarningModal.modal('show');
+        }
         if (!isJudgeAvailable) {
             this.isAllowChangeDataType(false);
             $judgeConfirmModal.modal('show');
@@ -1056,6 +1060,13 @@ class DataTypeDropdown_Helper extends DataTypeDropdown_Constant {
         const $cancelBtn = judgeConfirmModal.find('button[name=Cancel]');
         $cancelBtn.off('click');
         $cancelBtn.on('click', () => {
+            this.changeToNormalDataType(table, rowIndex);
+            judgeConfirmModal.modal('hide');
+        });
+
+        const $closeBtn = judgeConfirmModal.find('button.close');
+        $closeBtn.off('click');
+        $closeBtn.on('click', () => {
             this.changeToNormalDataType(table, rowIndex);
             judgeConfirmModal.modal('hide');
         });

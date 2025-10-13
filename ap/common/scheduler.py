@@ -31,7 +31,7 @@ def scheduler_app_context(fn):
 
     @wraps(fn)
     def inner(*args, **kwargs):
-        if len(args):
+        if args:
             raise RuntimeError(
                 'Function running in scheduler should never have passed `args`.'
                 'Please remove those `args` when you add job in `scheduler`',

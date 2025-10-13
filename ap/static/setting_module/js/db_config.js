@@ -8,6 +8,7 @@ const MIN_NUMBER_OF_SENSOR = 0;
 let isV2ProcessConfigOpening = false;
 let v2ImportInterval = null;
 const DUMMY_V2_PROCESS_NAME = 'DUMMY_V2_PROCESS_NAME';
+let pollingFrequencyOption = new PollingFrequencyOption('', 0);
 // data type
 const originalTypes = {
     0: null,
@@ -105,11 +106,11 @@ const DB_CONFIGS = {
             use_os_timezone: false,
         },
     },
-    SOFTWARE_WORKSHOP: {
-        name: 'software workshop',
+    POSTGRES_SOFTWARE_WORKSHOP: {
+        name: 'postgres software workshop',
         i18nLabel: $('#i18nDSTypeSoftwareWorkshop').text(),
         configs: {
-            type: 'SOFTWARE_WORKSHOP',
+            type: 'POSTGRES_SOFTWARE_WORKSHOP',
             port: 5432,
             schema: 'public',
             dbname: '',
@@ -117,6 +118,39 @@ const DB_CONFIGS = {
             username: '',
             password: '',
             use_os_timezone: false,
+        },
+    },
+    SNOWFLAKE: {
+        id: 'SNOWFLAKE',
+        name: 'Snowflake',
+        i18nLabel: $('#i18nDSTypeSnowflake').text(),
+        configs: {
+            type: 'SNOWFLAKE',
+            port: 443,
+            schema: 'public',
+            dbname: '',
+            host: '',
+            username: '',
+            password: '',
+            use_os_timezone: false,
+            auth_type_el: 'snowflakeAuthType',
+        },
+    },
+    SNOWFLAKE_SOFTWARE_WORKSHOP: {
+        id: 'SNOWFLAKE_SOFTWARE_WORKSHOP',
+        name: 'Snowflake Software Workshop',
+        master_type: 'OTHERS',
+        i18nLabel: $('#i18nDSTypeSnowflakeSW').text(),
+        configs: {
+            type: 'SNOWFLAKE_SOFTWARE_WORKSHOP',
+            port: 443,
+            schema: 'public',
+            dbname: '',
+            host: '',
+            username: '',
+            password: '',
+            use_os_timezone: false,
+            auth_type_el: 'snowflakeSWAuthType',
         },
     },
 };
@@ -134,6 +168,32 @@ const dbElements = {
     v2ProcessSelection: '#v2ProcessSelection',
     saveDataSourceModal: '#createV2ProcessDataSource',
     CSVTitle: $('#CSVSelectedLabel'),
+    lineGrpSelect: $('#modal-db-postgres_software_workshop select[name=lineGrps]'),
+    lineGroupContainer: $('#modal-db-postgres_software_workshop #lineGroupContainer'),
+    sfLineGrpSelect: $('#modal-db-snowflake_software_workshop select[name=lineGrps]'),
+    sfLineGroupContainer: $('#modal-db-snowflake_software_workshop #lineGroupContainer'),
+    softwareWorkshopInputSearch: 'input#search',
+    softwareWorkshopPreviewTbl: 'equipTable',
+    softwareWorkshopSearchSetBtn: '#setBtnSearchETL',
+    softwareWorkshopSearchResetBtn: '#resetBtnSearchETL',
+    softwareWorkshopCheckAll: '#equipTable .check-all-equip',
+    softwareWorkshopCheckItem: '#equipTable .check-item',
+    confirmSaveSoftwareWorkshopProcesses: '#confirmSaveSoftwareWorkshopProcesses',
+    snowflakeInputAreaAccessToken: {
+        SNOWFLAKE: '#inputAreaAccessTokenType',
+        SNOWFLAKE_SOFTWARE_WORKSHOP: '#inputSWAreaAccessTokenType',
+    },
+    snowflakeInputAreaPrivateKeyFile: {
+        SNOWFLAKE: '#inputAreaKeypairType',
+        SNOWFLAKE_SOFTWARE_WORKSHOP: '#inputSWAreaKeypairType',
+    },
+    pollingConfirmModal: '#polling-frequency-confirm-modal',
+    pollingConfirmModalBody: '#polling-frequency-confirm-modal .modal-body',
+};
+
+const SNOWFLAKE_AUTH_TYPES = {
+    ACCESS_TOKEN: 'access_token',
+    KEYPAIR: 'keypair',
 };
 
 const DATETIME = originalTypes[4];
@@ -156,13 +216,16 @@ const triggerEvents = {
     ALL: 'all',
 };
 
+let line_grp_infos = [];
+
 const checkFolderResources = async (folderUrl, originFolderUrl) => {
+    const isFile = await checkIsFilePath(folderUrl, originFolderUrl);
     $.ajax({
         url: csvResourceElements.apiCheckFolderUrl,
         method: 'POST',
         data: JSON.stringify({
             url: folderUrl,
-            isFile: await checkIsFilePath(folderUrl, originFolderUrl),
+            isFile: isFile,
         }),
         contentType: 'application/json',
         success: (res) => {
@@ -171,6 +234,8 @@ const checkFolderResources = async (folderUrl, originFolderUrl) => {
                     message: i18nDBCfg.dirExist,
                     is_error: false,
                 });
+                $(csvResourceElements.showResourcesBtnId).data('is_file', isFile);
+                $(csvResourceElements.showResourcesBtnId).data('is_valid_folder', true);
                 $(csvResourceElements.showResourcesBtnId).trigger('click');
             } else {
                 displayRegisterMessage(csvResourceElements.alertMsgCheckFolder, {
@@ -324,31 +389,36 @@ async function checkIsFilePath(folderUrl, originFolderUrl) {
     return folderInfo.isFile;
 }
 
-const showResources = async () => {
+const showResources = async (isFilePath = undefined, isValidFolder = undefined) => {
     const folderUrl = $(csvResourceElements.folderUrlInput).val();
     const originFolderUrl = $(csvResourceElements.folderUrlInput).data('originValue');
-    const isFilePath = await checkIsFilePath(folderUrl, originFolderUrl);
+    if (isFilePath == undefined) {
+        isFilePath = await checkIsFilePath(folderUrl, originFolderUrl);
+    }
     const db_code = $(csvResourceElements.showResourcesBtnId).data('itemId');
     const isV2 = $(csvResourceElements.showResourcesBtnId).attr('data-isV2') === 'true' || false;
-    const checkFolderAPI = '/ap/api/setting/check_folder';
-    const checkFolderRes = await fetchData(
-        checkFolderAPI,
-        JSON.stringify({ url: folderUrl, isFile: isFilePath }),
-        'POST',
-    );
-    if (checkFolderRes && !checkFolderRes.is_valid) {
-        displayRegisterMessage(csvResourceElements.alertMsgCheckFolder, {
-            message: checkFolderRes.err_msg,
-            is_error: true,
-        });
-        // hide loading
-        $('#resourceLoading').hide();
-        return;
+    if (isValidFolder == undefined) {
+        const checkFolderAPI = '/ap/api/setting/check_folder';
+        const checkFolderRes = await fetchData(
+            checkFolderAPI,
+            JSON.stringify({ url: folderUrl, isFile: isFilePath }),
+            'POST',
+        );
+        if (checkFolderRes && !checkFolderRes.is_valid) {
+            displayRegisterMessage(csvResourceElements.alertMsgCheckFolder, {
+                message: checkFolderRes.err_msg,
+                is_error: true,
+            });
+            // hide loading
+            $('#resourceLoading').hide();
+            return;
+        }
     }
     // get line skipping config
     const csvSkipHead = $('input[name=skip_head]').val() || null;
     const csvNRows = $(csvResourceElements.csvNRows).val() || null;
     const csvIsTranspose = $(csvResourceElements.csvIsTranspose).is(':checked');
+    const isFileChecked = $(csvResourceElements.isFileChecker).val() == 'true';
     $.ajax({
         url: csvResourceElements.apiUrl,
         method: 'POST',
@@ -362,6 +432,7 @@ const showResources = async () => {
             n_rows: csvNRows,
             is_transpose: csvIsTranspose,
             is_file: isFilePath,
+            is_file_checker: isFileChecked,
         }),
         contentType: 'application/json',
         success: (res) => {
@@ -496,11 +567,125 @@ const validateExistDBName = (dbName) => {
     };
 };
 
+const getSWProcessData = () => {
+    const processData = [];
+    const $equipTble = $(`#${dbElements.softwareWorkshopPreviewTbl}`);
+    const selectedItems = $equipTble.find('input:checked').not('#groupTableCheckBoxHeader');
+    if (selectedItems.length) {
+        Array.from(selectedItems).forEach((item) => {
+            processData.push({
+                table_name: $(item).data('table-name'),
+                child_equip_id: $(item).val(),
+                master_type: $(item).data('master-type'),
+            });
+        });
+    }
+    return processData;
+};
+
+// get new processes which selected from SoftwareWorkshop datasource
+const getNewProcesses = (addedProcesses) => {
+    const processItems = $('#tblProcConfig').find('tr[name=procInfo]');
+    const processIds = Array.from(processItems.map((proc) => $(proc).data('proc-id')));
+    return addedProcesses.filter((proc) => !processIds.includes(proc.id));
+};
+
+// Software workshop register datasource and processes
+const saveSWDatasource = (dsCode, dsConfig, isDirectlyImport = false) => {
+    const endPoint = 'api/setting/sw_register';
+    const data = {
+        datasource: dsConfig,
+        processes: getSWProcessData(),
+        is_directly_import: isDirectlyImport,
+    };
+
+    fetch(endPoint, {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    })
+        .then((response) => response.clone().json())
+        .then((json) => {
+            displayRegisterMessage('#alert-msg-db', json.flask_message);
+
+            // 新規アイテムのattrを設定する。
+            const itemName = 'name';
+            if (!dsCode) {
+                currentDSTR.attr('id', csvResourceElements.dsId + json.id);
+                currentDSTR.attr(csvResourceElements.dataSrcId, json.id);
+                // itemName = "master-name"
+            }
+
+            // データソース名とコメントの値を設定する。
+            const dbType = currentDSTR.find('select[name="type"]').val();
+            currentDSTR.find(`input[name="${itemName}"]`).val($(`#${dbType.toLowerCase()}_dbsourcename`).val());
+            currentDSTR.find('textarea[name="comment"]').val($(`#${dbType.toLowerCase()}_comment`).val());
+
+            PollingFrequencyOption.updateOptionsPollingFre(
+                currentDSTR,
+                dsConfig.type,
+                dsConfig.id,
+                dsConfig.polling_frequency / 60,
+            );
+
+            // remove tmp resource
+            tmpResource = {};
+            recentEdit(dsCode);
+
+            // add new data source
+            if (json.data_source) {
+                const newDataSrc = JSON.parse(json.data_source);
+                let isNew = true;
+                for (let i = 0; i < cfgDS.length; i++) {
+                    if (cfgDS[i].id === newDataSrc.id) {
+                        cfgDS[i] = newDataSrc;
+                        isNew = false;
+                        break;
+                    }
+                }
+                if (isNew) {
+                    cfgDS.push(newDataSrc);
+
+                    // update datasource in list of selection
+                    $('select[name=databaseName]').append(
+                        `<option data-ds-type="${newDataSrc.type}" value="${newDataSrc.id}">${newDataSrc.name}</option>`,
+                    );
+                }
+            }
+            handleChangeSelectToInputForDBType();
+
+            // if there is creating new datasource/ add new process from existing datasource
+            // add new processes into GUI
+            const newProcesses = getNewProcesses(json.processes);
+            if (!dsCode || newProcesses.length) {
+                newProcesses.forEach((proc) => {
+                    addProcToTable(
+                        proc.id,
+                        proc.name_en,
+                        proc.name_jp,
+                        proc.name_local,
+                        proc.shown_name,
+                        proc.data_source.id,
+                        proc.table_name,
+                        proc.data_source.name,
+                    );
+                });
+            }
+        })
+        .catch((json) => {
+            displayRegisterMessage('#alert-msg-db', json.flask_message);
+        });
+};
+
 let tmpResource;
 
 // call backend API to save
-const saveDataSource = (dsCode, dsConfig) => {
-    fetch('api/setting/data_source_save', {
+const saveDataSource = (dsCode, dsConfig, isDirectlyImport = false) => {
+    const endPoint = 'api/setting/data_source_save';
+    fetch(endPoint, {
         method: 'POST',
         headers: {
             'Accept': 'application/json',
@@ -521,15 +706,14 @@ const saveDataSource = (dsCode, dsConfig) => {
             }
 
             // データソース名とコメントの値を設定する。
-            const dbType = currentDSTR.find('select[name="type"]').val();
-            if (dbType === DB_CONFIGS.CSV.configs.type) {
-                currentDSTR.find(`input[name="${itemName}"]`).val($('#csvDBSourceName').val());
-                currentDSTR.find('textarea[name="comment"]').val($('#csvComment').val());
-            } else {
-                currentDSTR.find(`input[name="${itemName}"]`).val($(`#${dbType.toLowerCase()}_dbsourcename`).val());
-                currentDSTR.find('textarea[name="comment"]').val($(`#${dbType.toLowerCase()}_comment`).val());
-            }
-
+            currentDSTR.find(`input[name="${itemName}"]`).val(dsConfig.name);
+            currentDSTR.find('textarea[name="comment"]').val(dsConfig.comment);
+            PollingFrequencyOption.updateOptionsPollingFre(
+                currentDSTR,
+                dsConfig.type,
+                dsConfig.id,
+                dsConfig.polling_frequency / 60,
+            );
             // show toastr message to guide user to proceed to Process config
             showToastrToProceedProcessConfig();
             // remove tmp resource
@@ -589,11 +773,18 @@ const saveV2DataSource = (dsConfig) => {
                 const itemName = 'name';
                 currentDSTR.attr('id', csvResourceElements.dsId + dbs.id);
                 currentDSTR.attr(csvResourceElements.dataSrcId, dbs.id);
+                dbs.polling_frequency = dbs.polling_frequency == null ? 0 : dbs.polling_frequency;
 
                 // データソース名とコメントの値を設定する。
                 currentDSTR.find(`input[name="${itemName}"]`).val(dbs.name);
                 currentDSTR.find('textarea[name="comment"]').val(dbs.comment);
                 currentDSTR.find('select[name="type"]').val(dbs.type);
+                PollingFrequencyOption.updateOptionsPollingFre(
+                    currentDSTR,
+                    dbs.type,
+                    dbs.id,
+                    dbs.polling_frequency / 60,
+                );
 
                 // change select to input
                 handleChangeSelectToInputForDBType();
@@ -801,6 +992,7 @@ const genCsvInfo = async () => {
         type: dbType,
         comment: $('#csvComment').val(),
         csv_detail: dictCsvDetail,
+        ...pollingFrequencyOption.genPollingFrequencyInfo(),
     };
 
     for (let i = 0; i < columnNames.length; i++) {
@@ -934,7 +1126,7 @@ const genDBInfo = () => {
     const domDBPrefix = dbType.toLowerCase();
 
     // Get DB Information
-    const dictDBDetail = {
+    let dictDBDetail = {
         id: dbItemId,
         name: $(`#${domDBPrefix}_dbsourcename`).val(),
         type: dbType,
@@ -948,12 +1140,31 @@ const genDBInfo = () => {
         use_os_timezone: $(`#${domDBPrefix}_use_os_timezone`).val() === 'true',
     };
 
+    if ([DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.id, DB_CONFIGS.SNOWFLAKE.id].includes(dbType)) {
+        const authTypeName = DB_CONFIGS[dbType].configs.auth_type_el;
+        const snowflakeDBDetail = {
+            pull_from: $(`#${domDBPrefix}_pull_from`).val() || moment().subtract(30, 'days').format('YYYY-MM-DD'),
+            snowflake_role: $(`#${domDBPrefix}_role`).val(),
+            snowflake_warehouse: $(`#${domDBPrefix}_warehouse`).val(),
+            snowflake_private_key_file: $(`#${domDBPrefix}_private_key_file`).val(),
+            snowflake_private_key_file_pwd: $(`#${domDBPrefix}_private_key_file_pwd`).val(),
+            snowflake_authentication_type: $(`input[name='${authTypeName}']:checked`).val(),
+            snowflake_access_token: $(`#${domDBPrefix}_access_token`).val(),
+        };
+        dictDBDetail = {
+            ...dictDBDetail,
+            ...snowflakeDBDetail,
+        };
+    }
+    // Get DB Information
+
     const dictDataSrc = {
         id: dbItemId,
         name: $(`#${domDBPrefix}_dbsourcename`).val(),
         type: dbType,
         comment: $(`#${domDBPrefix}_comment`).val(),
         db_detail: dictDBDetail,
+        ...pollingFrequencyOption.genPollingFrequencyInfo(),
     };
 
     return dictDataSrc;
@@ -1078,7 +1289,9 @@ const addDBConfigRow = () => {
                 <option value="${DB_CONFIGS.ORACLE.configs.type}">${DB_CONFIGS.ORACLE.i18nLabel}</option>
                 <option value="${DB_CONFIGS.MYSQL.configs.type}">${DB_CONFIGS.MYSQL.i18nLabel}</option>
                 <option value="${DB_CONFIGS.V2.configs.type}">${DB_CONFIGS.V2.i18nLabel}</option>
-                <option value="${DB_CONFIGS.SOFTWARE_WORKSHOP.configs.type}">${DB_CONFIGS.SOFTWARE_WORKSHOP.i18nLabel}</option>
+                <option value="${DB_CONFIGS.SNOWFLAKE.configs.type}">${DB_CONFIGS.SNOWFLAKE.i18nLabel}</option>
+                <option value="${DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.configs.type}">${DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.i18nLabel}</option>
+                <option value="${DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type}">${DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.i18nLabel}</option>
             </select>
         </td>
         <td class="text-center">
@@ -1092,6 +1305,9 @@ const addDBConfigRow = () => {
                 class="form-control" rows="1"
                 disabled="disabled" placeholder="${dbConfigTextByLang.Comment}"></textarea>
         </td>
+        <td>
+            ${PollingFrequencyOption.pollingOptionHtml('mainCSV', 3)}
+        </td>
         <td class="text-center">
             <button onclick="deleteRow(this,null)" type="button" class="btn btn-secondary icon-btn">
                 <i class="fas fa-trash-alt icon-secondary"></i>
@@ -1102,6 +1318,7 @@ const addDBConfigRow = () => {
     setTimeout(() => {
         scrollToBottom(`${dbElements.tblDbConfig}_wrap`);
     }, 200);
+    PollingFrequencyOption.handleOnChangeMainPollingFrequency();
     return $(`#${dbElements.tblDbConfig} > tbody tr:last-child`);
     // filter code
     // resetDataTable(dbElements.tblDbConfigID, {}, [0, 1, 3], row);
@@ -1185,6 +1402,10 @@ const confirmDeleteDS = async () => {
 const showToastrToProceedProcessConfig = () => {
     const msgContent = `<p>${$('#i18nProceedToProcessConfig').text()}</p>`;
     showToastrMsg(msgContent, MESSAGE_LEVEL.INFO);
+};
+
+const showMessage = (message) => {
+    showToastrMsg(message, MESSAGE_LEVEL.INFO);
 };
 
 const getDataTypeFromID = (dataTypeID) => {
@@ -1276,10 +1497,12 @@ const updateSubmitBtn = () => {
 };
 
 const bindDBItemToModal = (selectedDatabaseType, dictDataSrc) => {
+    // set default polling frequency = dictDataSrc.polling_frequency
+    pollingFrequencyOption = new PollingFrequencyOption(selectedDatabaseType, dictDataSrc.polling_frequency);
     // Clear message
     clearOldValue();
 
-    let domModalPrefix = selectedDatabaseType.toLowerCase();
+    let domModalPrefix = selectedDatabaseType?.toLowerCase();
 
     // show upon db types
     switch (selectedDatabaseType) {
@@ -1357,9 +1580,11 @@ const bindDBItemToModal = (selectedDatabaseType, dictDataSrc) => {
                 const skipHead = dictDataSrc.csv_detail.skip_head;
                 const isDummyHeader = dictDataSrc.csv_detail.dummy_header;
                 const lineSkip = skipHead == 0 && !isDummyHeader ? '' : skipHead;
+                const isFileChecker = dictDataSrc.csv_detail.is_file_checker;
                 $(csvResourceElements.skipHead).val(lineSkip);
                 $(csvResourceElements.csvNRows).val(dictDataSrc.csv_detail.n_rows);
                 $(csvResourceElements.csvIsTranspose).prop('checked', !!dictDataSrc.csv_detail.is_transpose);
+                $(csvResourceElements.isFileChecker).val(isFileChecker);
 
                 // update observer:
                 $(csvResourceElements.skipHead).attr('data-observer', lineSkip || '');
@@ -1436,6 +1661,41 @@ const bindDBItemToModal = (selectedDatabaseType, dictDataSrc) => {
                 $(`#${domModalPrefix}_password`).attr('placeholder', '');
             }
             $(`#${domModalPrefix}_use_os_timezone`).val(dictDataSrc.db_detail.use_os_timezone);
+            if ([DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.id, DB_CONFIGS.SNOWFLAKE.id].includes(selectedDatabaseType)) {
+                const pullFromValue =
+                    dictDataSrc.db_detail && dictDataSrc.db_detail.pull_from
+                        ? moment(dictDataSrc.db_detail.pull_from, 'YYYY-MM-DDTHH:mm:ss.SSSSSSZ').format('YYYY-MM-DD')
+                        : moment().subtract(30, 'days').format('YYYY-MM-DD');
+
+                $(`#${domModalPrefix}_pull_from`).val(pullFromValue);
+                $(`#${domModalPrefix}_role`).val(dictDataSrc.db_detail.snowflake_role);
+                $(`#${domModalPrefix}_warehouse`).val(dictDataSrc.db_detail.snowflake_warehouse);
+                $(`#${domModalPrefix}_private_key_file`).val(dictDataSrc.db_detail.snowflake_private_key_file);
+                $(`#${domModalPrefix}_private_key_file_pwd`).val('');
+                $(`#${domModalPrefix}_access_token`).val('');
+                initializeDateTimePicker('snowflake_pull_from');
+                initializeDateTimePicker('snowflake_software_workshop_pull_from');
+                const authTypeName = DB_CONFIGS[selectedDatabaseType].configs.auth_type_el;
+                if (dictDataSrc.id) {
+                    const authTypeRadio = $(
+                        `input[name='${authTypeName}'][value=${dictDataSrc.db_detail.snowflake_authentication_type}]`,
+                    );
+                    authTypeRadio.prop('checked', true).trigger('change');
+                    $(`#${domModalPrefix}_access_token`).attr('placeholder', `<${i18nDBCfg.hiddenPlaceholder}>`);
+                    $(`#${domModalPrefix}_private_key_file`).attr('placeholder', `<${i18nDBCfg.hiddenPlaceholder}>`);
+                    $(`#${domModalPrefix}_private_key_file_pwd`).attr(
+                        'placeholder',
+                        `<${i18nDBCfg.hiddenPlaceholder}>`,
+                    );
+                } else {
+                    $(`input[name='${authTypeName}'][value=${SNOWFLAKE_AUTH_TYPES.ACCESS_TOKEN}]`)
+                        .prop('checked', true)
+                        .trigger('change');
+                    $(`#${domModalPrefix}_access_token`).attr('placeholder', '');
+                    $(`#${domModalPrefix}_private_key_file`).attr('placeholder', '');
+                    $(`#${domModalPrefix}_private_key_file_pwd`).attr('placeholder', '');
+                }
+            }
             $(eles.useOSTZOption).prop('checked', dictDataSrc.db_detail.use_os_timezone);
             $(eles.useOSTZOption).data('previous-value', dictDataSrc.db_detail.use_os_timezone);
 
@@ -1497,6 +1757,22 @@ const checkDBConnection = (dbType, html, msgID) => {
         db_type: dbType,
     });
 
+    const isSnowFlake = [
+        DB_CONFIGS.SNOWFLAKE.configs.type.toLowerCase(),
+        DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type.toLowerCase(),
+    ].includes(dbType);
+    if (isSnowFlake) {
+        const authTypeElName = DB_CONFIGS[dbType.toUpperCase()].configs.auth_type_el;
+        Object.assign(data.db, {
+            snowflake_role: $(`#modal-db-${dbType} input[name="${dbType}_role"]`).val(),
+            snowflake_warehouse: $(`#modal-db-${dbType} input[name="${dbType}_warehouse"]`).val(),
+            snowflake_private_key_file: $(`#modal-db-${dbType} input[name="${dbType}_private_key_file"]`).val(),
+            snowflake_private_key_file_pwd: $(`#modal-db-${dbType} input[name="${dbType}_private_key_file_pwd"]`).val(),
+            snowflake_authentication_type: $(`input[name='${authTypeElName}']:checked`).val(),
+            snowflake_access_token: $(`#modal-db-${dbType} input[name="${dbType}_access_token"]`).val(),
+        });
+    }
+
     fetch('api/setting/check_db_connection', {
         method: 'POST',
         headers: {
@@ -1516,6 +1792,8 @@ const loadDetail = (self) => {
     currentDSTR = $(self).closest('tr');
     const dataSrcId = currentDSTR.attr(csvResourceElements.dataSrcId);
     const dsType = getDbType(dataSrcId);
+    dbElements.lineGroupContainer.css('display', 'none');
+    dbElements.sfLineGroupContainer.css('display', 'none');
     // When click (+) to create blank item
     if (dataSrcId === null || dataSrcId === undefined) {
         let jsonDictDataSrc = {};
@@ -1576,11 +1854,29 @@ const loadDetail = (self) => {
                 };
                 break;
             }
-            case DB_CONFIGS.SOFTWARE_WORKSHOP.configs.type: {
+            case DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.configs.type: {
                 jsonDictDataSrc = {
                     id: null,
                     comment: '',
-                    db_detail: DB_CONFIGS.SOFTWARE_WORKSHOP.configs,
+                    db_detail: DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.configs,
+                };
+                break;
+            }
+            case DB_CONFIGS.SNOWFLAKE.configs.type: {
+                jsonDictDataSrc = {
+                    id: null,
+                    comment: '',
+                    master_type: DB_CONFIGS.SNOWFLAKE.master_type,
+                    db_detail: DB_CONFIGS.SNOWFLAKE.configs,
+                };
+                break;
+            }
+            case DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type: {
+                jsonDictDataSrc = {
+                    id: null,
+                    comment: '',
+                    master_type: DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.master_type,
+                    db_detail: DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs,
                 };
                 break;
             }
@@ -1670,23 +1966,15 @@ $(() => {
     });
     $(csvResourceElements.showResourcesBtnId).on('click', () => {
         $('#resourceLoading').show();
-        showResources();
+        const isFile = $(csvResourceElements.showResourcesBtnId).data('is_file');
+        const isValidFolder = $(csvResourceElements.showResourcesBtnId).data('is_valid_folder');
+        showResources(isFile, isValidFolder);
+        $(csvResourceElements.showResourcesBtnId).removeData('is_file');
+        $(csvResourceElements.showResourcesBtnId).removeData('is_valid_folder');
     });
 
     $(csvResourceElements.csvConfirmRegister).on('click', (e) => {
         saveCSVDataSource().then(() => {});
-    });
-
-    // Multiple modal
-    $(document).on('show.bs.modal', '.modal', (e) => {
-        const zIndex = 1040 + 10 * $('.modal:visible').length;
-        $(e.currentTarget).css('z-index', zIndex);
-        setTimeout(() => {
-            $('.modal-backdrop')
-                .not('.modal-stack')
-                .css('z-index', zIndex - 1)
-                .addClass('modal-stack');
-        }, 0);
     });
 
     // add an empty db row if there is no db config
@@ -1701,8 +1989,12 @@ $(() => {
     $(dbConfigElements.csvDBSourceName).on('mouseup', () => {
         userEditedDSName = true;
     });
-    $(dbConfigElements.sqliteDbSource).on('change', (e) => {
-        trimQuotesSpacesAndUpdate(e.target);
+    [
+        $(dbConfigElements.sqliteDbSource),
+        $(dbConfigElements.snowflakePrivateKeyFileInput),
+        $(dbConfigElements.snowflakeSWPrivateKeyFileInput),
+    ].forEach((el) => {
+        el.on('change', (el) => trimQuotesSpacesAndUpdate(el.target));
     });
 
     let debounceTimer;
@@ -1729,7 +2021,7 @@ $(() => {
             }
             // handle show data when enter a path to the input in Data Source Config
             $(csvResourceElements.connectResourceBtn).trigger('click');
-            $(csvResourceElements.showResourcesBtnId).trigger('click');
+            // $(csvResourceElements.showResourcesBtnId).trigger('click');
         }, 300); // delay input 300ms
     });
 
@@ -1744,10 +2036,16 @@ $(() => {
         }
     });
 
+    $('#btnCancelPollingFrequency').on('click', () => {
+        pollingFrequencyOption.handleClickCancelPollingFrequency();
+    });
+
+    PollingFrequencyOption.handleOnChangeMainPollingFrequency();
+
     // searchDataSource
     onSearchTableContent('searchDataSource', 'tblDbConfig');
     onSearchTableContent('searchProcConfig', 'tblProcConfig');
-    sortableTable('tblDbConfig', [0, 1, 2, 4], 510, true);
+    sortableTable('tblDbConfig', [0, 1, 2, 4, 5], 510, true);
     sortableTable('tblProcConfig', [0, 1, 2, 3, 5], 510, true);
 });
 
@@ -1757,4 +2055,163 @@ const getDbType = (dbItemId) => {
     }
     // new data source
     return currentDSTR.find('select[name="type"]').val();
+};
+
+const previewSoftwareWorkshop = (dbType, html, msgID) => {
+    // reset connection status text
+    $(`#${msgID}`).html('');
+    $(`#${msgID}`).addClass('spinner-grow');
+    $(`#${msgID}`).removeClass('text-danger');
+    $(`#${msgID}`).removeClass('text-success');
+
+    // get form data
+    const data = {
+        db: {},
+    };
+
+    let db_id = null;
+    const db_id_val = $(`#modal-db-${dbType} input[name="${dbType}_id"]`).val();
+    if (db_id_val) db_id = parseInt(db_id_val);
+    Object.assign(data.db, {
+        id: db_id,
+        host: $(`#modal-db-${dbType} input[name="${dbType}_host"]`).val(),
+        port: $(`#modal-db-${dbType} input[name="${dbType}_port"]`).val(),
+        schema: $(`#modal-db-${dbType} input[name="${dbType}_schema"]`).val(),
+        username: $(`#modal-db-${dbType} input[name="${dbType}_username"]`).val(),
+        password: $(`#modal-db-${dbType} input[name="${dbType}_password"]`).val(),
+        dbname: $(`#modal-db-${dbType} input[name="${dbType}_dbname"]`).val(),
+        db_type: dbType,
+    });
+
+    const isSnowFlake = [
+        DB_CONFIGS.SNOWFLAKE.configs.type.toLowerCase(),
+        DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type.toLowerCase(),
+    ].includes(dbType);
+    if (isSnowFlake) {
+        const authTypeElName = DB_CONFIGS[dbType.toUpperCase()].configs.auth_type_el;
+        Object.assign(data.db, {
+            snowflake_role: $(`#modal-db-${dbType} input[name="${dbType}_role"]`).val(),
+            snowflake_warehouse: $(`#modal-db-${dbType} input[name="${dbType}_warehouse"]`).val(),
+            snowflake_private_key_file: $(`#modal-db-${dbType} input[name="${dbType}_private_key_file"]`).val(),
+            snowflake_private_key_file_pwd: $(`#modal-db-${dbType} input[name="${dbType}_private_key_file_pwd"]`).val(),
+            snowflake_authentication_type: $(`input[name='${authTypeElName}']:checked`).val(),
+            snowflake_access_token: $(`#modal-db-${dbType} input[name="${dbType}_access_token"]`).val(),
+        });
+    }
+    const $lineGroupContainer = !isSnowFlake ? dbElements.lineGroupContainer : dbElements.sfLineGroupContainer;
+    const $lineGrpSelect = !isSnowFlake ? dbElements.lineGrpSelect : dbElements.sfLineGrpSelect;
+
+    fetch('api/setting/preview_software_workshop', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    })
+        .then((response) => response.clone().json())
+        .then((json) => {
+            $lineGroupContainer.css('display', json.flask_message.connected ? '' : 'none');
+            displayTestDBConnectionMessage(msgID, json.flask_message);
+            line_grp_infos = json.db_info.line_group_infos;
+            fillLineGroupIdSelect(json.db_info.line_groups, $lineGrpSelect, isSnowFlake);
+            document.getElementById('groupTable').replaceChildren();
+            $lineGrpSelect.val(0).trigger('change'); // Select first line_group
+        });
+};
+
+const fillLineGroupIdSelect = (data, lineGrpSelect, isSnowFlake) => {
+    //  clear line group data first
+    $(lineGrpSelect).empty();
+    data.forEach(function (line_grp, index) {
+        const option_attribute = {
+            value: index,
+            text: line_grp,
+        };
+        lineGrpSelect.append($('<option/>', option_attribute));
+    });
+    $(lineGrpSelect).on('change', (e) => {
+        createGroupTable(line_grp_infos[parseInt(e.currentTarget.value)], isSnowFlake);
+    });
+};
+
+const fillChildEquipSelect = (line_grp_id) => {
+    return;
+};
+
+const initChildEquipTableEvents = () => {
+    $(dbElements.softwareWorkshopCheckAll).on('change', (e) => {
+        $(dbElements.softwareWorkshopCheckItem).prop('checked', e.target.checked);
+    });
+
+    $(dbElements.softwareWorkshopCheckItem).on('change', (e) => {
+        const lengthCheckedItems = $(`${dbElements.softwareWorkshopCheckItem}:checked`).length;
+        const lengthItems = $(dbElements.softwareWorkshopCheckItem).length;
+        $(dbElements.softwareWorkshopCheckAll).prop('checked', lengthCheckedItems === lengthItems);
+    });
+
+    $(dbElements.softwareWorkshopSearchSetBtn).on('click', (e) => {
+        $(`#${dbElements.softwareWorkshopPreviewTbl}`)
+            .find('tbody tr:visible:not(.gray) input[type=checkbox]')
+            .prop('checked', true)
+            .trigger('change');
+    });
+
+    $(dbElements.softwareWorkshopSearchResetBtn).on('click', (e) => {
+        $(`#${dbElements.softwareWorkshopPreviewTbl}`)
+            .find('tbody tr:visible:not(.gray) input[type=checkbox]')
+            .prop('checked', false)
+            .trigger('change');
+    });
+    onSearchTableContentByKeypressInput(dbElements.softwareWorkshopInputSearch, dbElements.softwareWorkshopPreviewTbl);
+};
+
+const showSoftwareWorkshopConfirmationModal = () => {
+    $(dbElements.confirmSaveSoftwareWorkshopProcesses).modal('show');
+};
+
+const bulkImportSoftwareWorkshop = () => {
+    if (validateDBInfo()) {
+        // call SW Register
+        const dataSrcId = currentDSTR.attr(csvResourceElements.dataSrcId);
+        const dictDataSrc = genDBInfo();
+
+        // save SW with bulk import
+        saveSWDatasource(dataSrcId, dictDataSrc, true);
+
+        // show toast after save
+        $('.modal').modal('hide');
+    }
+};
+
+const bulkRegisterSoftwareWorkshop = () => {
+    if (validateDBInfo()) {
+        // call SW Register
+        const dataSrcId = currentDSTR.attr(csvResourceElements.dataSrcId);
+        const dictDataSrc = genDBInfo();
+
+        // save SW without import
+        saveSWDatasource(dataSrcId, dictDataSrc);
+
+        // show toast after save
+        $('.modal').modal('hide');
+    }
+};
+
+const switchAuthTypeDisplay = (e, dbType = DB_CONFIGS.SNOWFLAKE.configs.type) => {
+    const selectedAuthMode = e.value;
+    switch (selectedAuthMode) {
+        case SNOWFLAKE_AUTH_TYPES.ACCESS_TOKEN:
+            $(dbElements.snowflakeInputAreaAccessToken[dbType]).css('display', 'block');
+            $(dbElements.snowflakeInputAreaPrivateKeyFile[dbType]).css('display', 'none');
+            break;
+        case SNOWFLAKE_AUTH_TYPES.KEYPAIR:
+            $(dbElements.snowflakeInputAreaPrivateKeyFile[dbType]).css('display', 'flex');
+            $(dbElements.snowflakeInputAreaAccessToken[dbType]).css('display', 'none');
+            break;
+        default:
+            $(dbElements.snowflakeInputAreaAccessToken[dbType]).css('display', 'block');
+            $(dbElements.snowflakeInputAreaPrivateKeyFile[dbType]).css('display', 'none');
+            break;
+    }
 };

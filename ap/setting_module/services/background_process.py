@@ -3,7 +3,7 @@ import datetime as dt
 import logging
 import math
 import re
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from flask_sqlalchemy.pagination import QueryPagination
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
@@ -22,6 +22,7 @@ from ap.common.constants import (
     ID,
     UNKNOWN_ERROR_TEXT,
     AnnounceEvent,
+    DBType,
     DiskUsageStatus,
     JobStatus,
     JobType,
@@ -58,7 +59,7 @@ class JobSerializedOutput(BaseModel):
     model_config = ConfigDict(coerce_numbers_to_str=True, validate_assignment=True)
 
     id: int = Field(serialization_alias='job_id')
-    job_type: str = ''
+    job_type: Optional[Union[JobType, str]]
     db_code: Optional[int]
     db_name: Optional[str] = Field(serialization_alias='db_master_name')
     process_id: Optional[int] = Field(serialization_alias='proc_id')
@@ -80,7 +81,7 @@ class JobSerializedOutput(BaseModel):
     @computed_field
     def job_name(self) -> str:
         # get job information and send to UI
-        return generate_job_id(self.job_type, self.process_id)
+        return generate_job_id(JobType[self.job_type], process_id=self.process_id, data_source_id=self.db_code)
 
     @computed_field()
     def process_master_name(self) -> str:
@@ -168,7 +169,7 @@ def send_processing_info(
 
         # datasource_idの代わりに、t_job_managementテーブルにdatasource_nameが保存される。
         if job.db_code is not None:
-            data_source = CfgDataSource.get_ds(job.db_code)
+            data_source = meta_session.query(CfgDataSource).get(job.db_code)
             job.db_name = data_source.name
 
         job.process_id = process_id
@@ -176,7 +177,7 @@ def send_processing_info(
         # Yamlの代わりに、データベースからデータを取得する。
         job.process_name = process_name
         if not process_name and job.process_id:
-            data_process = CfgProcess.get_proc_by_id(job.process_id)
+            data_process = meta_session.query(CfgProcess).get(job.process_id)
             if data_process:
                 job.process_name = data_process.name
 
@@ -193,7 +194,7 @@ def send_processing_info(
     notify_data_type_error_flg = True
     while True:
         try:
-            if is_check_disk:
+            if is_check_disk and JobType[job.job_type] in JobType.jobs_can_increase_disk_usage():
                 disk_capacity = get_disk_capacity_once(_job_id=job_output.id)
 
                 if disk_capacity:
@@ -305,20 +306,6 @@ def send_processing_info(
             event=AnnounceEvent.JOB_RUN,
         ),
     )
-    if job_output.job_type == JobType.CSV_IMPORT.name:
-        dic_register_progress = {
-            'status': job_output.status,
-            'process_id': job_output.process_id,
-            'is_first_imported': False,
-        }
-        # TODO: change job id?
-        EventQueue.put(
-            EventBackgroundAnnounce(
-                job_id=job_output.id,
-                data=dic_register_progress,
-                event=AnnounceEvent.DATA_REGISTER,
-            ),
-        )
 
 
 def update_job_management(job_output: JobSerializedOutput, err=None) -> JobSerializedOutput:
@@ -455,19 +442,24 @@ class JobInfo:
         self.is_safe_interrupt = False
 
 
-def format_factory_date_to_meta_data(date_val, is_tz_col):
+def format_factory_date_to_meta_data(date_val: Optional[str], is_tz_col: bool, db_type: str = None) -> Optional[str]:
+    if date_val is None:
+        return None
+
     if is_tz_col:
         convert_utc_func, _ = choose_utc_convert_func(date_val)
         date_val = convert_utc_func(date_val)
         date_val = date_val.replace('T', ' ')
-        regex_str = r'(\.)(\d{3})(\d{3})'
-        date_val = re.sub(regex_str, '\\1\\2', date_val)
+
+        # store millisecond for mssqlserver and oracle
+        if db_type in (DBType.MSSQLSERVER.name, DBType.ORACLE.name):
+            regex_str = r'(\.)(\d{3})(\d{3})'
+            date_val = re.sub(regex_str, '\\1\\2', date_val)
+    # store millisecond for mssqlserver and oracle
+    elif db_type in (DBType.MSSQLSERVER.name, DBType.ORACLE.name):
+        date_val = convert_time(date_val, format_str=DATE_FORMAT_STR_FACTORY_DB, only_millisecond=True)
     else:
-        date_val = convert_time(
-            date_val,
-            format_str=DATE_FORMAT_STR_FACTORY_DB,
-            only_millisecond=True,
-        )
+        date_val = convert_time(date_val, format_str=DATE_FORMAT_STR_FACTORY_DB)
 
     return date_val
 
@@ -488,7 +480,6 @@ def get_job_detail_service(job_id):
             with DbProxy(
                 gen_data_source_of_universal_db(job.process_id),
                 True,
-                immediate_isolation_level=False,
             ) as db_instance:
                 trans_data.create_table(db_instance)
                 job_details = trans_data.get_import_history_error_jobs(db_instance, job_id)

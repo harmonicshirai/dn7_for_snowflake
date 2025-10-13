@@ -235,10 +235,7 @@ class AutolinkDataProcess:
         # do not run if we don't have main datetime column, or that column is created from dummy datetime
         if self.main_datetime_col is None:
             return False
-        if self.main_datetime_col.is_dummy_datetime:
-            return False
-
-        return True
+        return not self.main_datetime_col.is_dummy_datetime
 
     def is_generated_datetime(self) -> bool:
         return self.main_date_col is not None and self.main_time_col is not None

@@ -161,3 +161,11 @@ a.link-address {
 .collapsed-btn svg {
     margin-right: 4px;
 }
+
+.highlight-search {
+    background-color: #ff0;
+    color: #000;
+}
+.search-usage {
+    border: 2px solid #444444;
+}

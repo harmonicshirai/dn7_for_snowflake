@@ -14,13 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class Oracle:
-    def __init__(self, host, service_name, username, password):
+    # dbname = service_name, but we want to have the same arguments name using in `ReadOnlyDbProxy`
+    def __init__(self, host, dbname, username, password, port=1521, read_only=False):
         self.host = host
-        self.port = 1521
-        self.dbname = service_name
+        self.port = port
+        self.dbname = dbname
         self.username = username
         self.password = password
         self.is_connected = False
+        self.read_only = read_only
 
     def dump(self):
         logger.info(
@@ -330,10 +332,7 @@ self.is_connected: {self.is_connected}
     def is_timezone_hold_column(self, tbl, col):
         data_type = self.get_data_type_by_colname(tbl, col)
 
-        if 'TIME ZONE' in data_type.upper():
-            return True
-
-        return False
+        return 'TIME ZONE' in data_type.upper()
 
     def get_timezone(self):
         try:

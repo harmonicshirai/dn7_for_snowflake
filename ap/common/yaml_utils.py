@@ -1,6 +1,8 @@
 import logging
 import os
 from collections import OrderedDict
+from dataclasses import dataclass, fields, is_dataclass
+from typing import Optional, Type, TypeVar, Union
 
 from ruamel import yaml
 from ruamel.yaml import add_constructor, resolver
@@ -26,22 +28,6 @@ YAML_TILE_INTERFACE_AP = 'tile_interface_analysis_platform.yml'
 YAML_TILE_INTERFACE_USAGE = 'tile_interface_search_by_use.yml'
 YAML_TILE_JUMP = 'tile_interface_jump.yml'
 YAML_START_UP_FILE_NAME = 'startup.yaml'
-
-
-# class Singleton(type):
-#     """ Metaclass that creates a Singleton base type when called.  """
-#
-#     def __call__(cls, *args, **kwargs):
-#         try:
-#             instances = g.setdefault(FlaskGKey.YAML_CONFIG, {})
-#         except Exception:
-#             # for unit test
-#             instances = {}
-#
-#         if cls not in instances:
-#             instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
-#
-#         return instances[cls]
 
 
 class YamlConfig:
@@ -215,3 +201,56 @@ class TileInterfaceYaml(YamlConfig):
         yml_file_name = self.YML_CFG[file_name]
         file_name = os.path.join('ap', 'config', yml_file_name)
         super().__init__(file_name)
+
+
+T = TypeVar('T')
+
+
+def from_dict(cls: Type[T], data: dict) -> T:
+    """
+    Generic helper to create dataclass from dict, recursively.
+    """
+    if not is_dataclass(cls):
+        return data  # just return primitive or unknown types as is
+
+    field_types = {f.name: f.type for f in fields(cls)}
+    kwargs = {}
+    for key, value in data.items():
+        if key in field_types:
+            field_type = field_types[key]
+            if hasattr(field_type, '__origin__') and isinstance(field_type.__origin__, list):
+                kwargs[key] = value
+            elif is_dataclass(field_type):
+                kwargs[key] = from_dict(field_type, value)
+            else:
+                kwargs[key] = value
+        else:
+            # Ignore keys not in dataclass fields or handle dynamically if you want
+            pass
+    return cls(**kwargs)
+
+
+@dataclass
+class StartupSettings:
+    """
+    Extract data from Startup Yaml
+    """
+
+    port: Optional[int] = None
+    language: Optional[str] = None
+    subtitle: Optional[str] = None
+    proxy_http: Optional[str] = None
+    proxy_https: Optional[str] = None
+    network_nck: bool = False
+    env_ap: Optional[str] = 'prod'  # production
+    flask_debug: bool = False
+    # todo: use bool instead of int in yaml
+    update_R: Optional[int] = 0
+    enable_file_log: Union[bool, int] = 0
+    enable_ga_tracking: Union[bool, int] = 0
+    enable_dump_trace_log: Union[bool, int] = 0
+    disable_config_from_external: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return from_dict(cls, data)

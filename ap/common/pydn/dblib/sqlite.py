@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLite3:
-    def __init__(self, dbname, isolation_level=None):
+    def __init__(self, dbname, isolation_level=None, read_only=False):
         # from ap import SQLITE_CONFIG_DIR, dic_config
 
         # self.dbname = os.path.join(
@@ -26,7 +26,8 @@ class SQLite3:
         self.is_connected = False
         self.connection = None
         self.cursor = None
-        self.isolation_level = isolation_level
+        self.isolation_level = False  # Temporary disable isolation feature to avoid db lock issue
+        self.read_only = read_only
 
     def dump(self):
         logger.info(

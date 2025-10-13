@@ -525,7 +525,7 @@ def summarize_header_as_df(hdr: dict, info: dict):
     head['units'] = units['unit']
     head['user'] = [x + y for x, y in zip(units['colname'], units['suffix'])]
     # translate
-    head['main'] = _translate_wellknown_jp2en(head['main'])
+    head['main'] = translate_wellknown_jp2en(head['main'])
     # if head$main has some same value, add _01, _02, ...
     head['main'], *_ = add_suffix_if_duplicated(head['main'])
 
@@ -592,7 +592,7 @@ def convert_wellknown_col_name(col_name):
     return col_name, is_wellknown_col
 
 
-def _translate_wellknown_jp2en(x):
+def translate_wellknown_jp2en(x):
     fromto = {
         '製品': 'Product',
         'ロット': 'Lot',

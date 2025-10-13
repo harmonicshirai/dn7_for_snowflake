@@ -24,7 +24,10 @@ class StrEnumWithLowerCase(str, Enum):
     """String enum for insensitive cases"""
 
     def __eq__(self, other: Union[str, BaseEnum]) -> bool:
-        return self.lower() == other.lower().strip()
+        return self.lower().strip() == other.lower().strip()
+
+    def __hash__(self) -> int:
+        return hash(self.lower().strip())
 
     @classmethod
     def get(cls, value, default=None):

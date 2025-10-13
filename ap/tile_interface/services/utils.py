@@ -31,9 +31,7 @@ def section_infor_with_lang(sections, language, is_usage, master_info):
     max_cols = MAX_COL_IN_TILES if not is_usage else MAX_COL_IN_USAGE
     for section in sections:
         section[TITLE] = section[title_lang] if title_lang in section else section[default_lang]
-        section[EXAMPLE] = (
-            section[eg_lang] if eg_lang in section else (section[eg_default_lang] if eg_default_lang in section else '')
-        )
+        section[EXAMPLE] = section[eg_lang] if eg_lang in section else (section.get(eg_default_lang, ''))
         section[ICON_PATH] = TILE_RESOURCE_URL + section[ICON_PATH] if ICON_PATH in section else ''
         tile_rows = 0
         for tile in section[TILES]:
@@ -47,8 +45,7 @@ def section_infor_with_lang(sections, language, is_usage, master_info):
             )
             current_hover = current_hover.replace('"', '&quot;')
             tile[HOVER] = current_hover.replace('\\n', '&#10;')
-            if int(tile[ROW]) > tile_rows:
-                tile_rows = int(tile[ROW])
+            tile_rows = max(tile_rows, int(tile[ROW]))
 
         tiles_by_row = [None] * tile_rows
         for i in range(tile_rows):
@@ -61,11 +58,7 @@ def section_infor_with_lang(sections, language, is_usage, master_info):
                     if title_lang in master_info[page]
                     else master_info[page][default_lang]
                 )
-                tile[DESCRIPTION] = (
-                    tile[desc_lang]
-                    if desc_lang in tile
-                    else (tile[desc_default_lang] if desc_default_lang in tile else '')
-                )
+                tile[DESCRIPTION] = tile[desc_lang] if desc_lang in tile else (tile.get(desc_default_lang, ''))
                 tile_col = int(tile[COLUMN]) - 1
                 tile_row = int(tile[ROW]) - 1
                 if tile_col in rows_index and tile_row == i:

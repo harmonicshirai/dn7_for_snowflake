@@ -7,6 +7,8 @@ import time
 from datetime import datetime
 from sqlite3 import OperationalError
 
+import flask_migrate
+import pandas as pd
 import sqlalchemy as sa
 import wtforms_json
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,7 +20,7 @@ from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from pytz import utc
-from sqlalchemy import NullPool
+from sqlalchemy import MetaData, NullPool
 from sqlalchemy.orm import DeclarativeBase, create_session, scoped_session
 
 from ap.common.common_utils import (
@@ -31,14 +33,17 @@ from ap.common.constants import (
     APP_DB_FILE,
     DATE_FORMAT_STR,
     DB_SECRET_KEY,
+    DISABLE_CONFIG_FROM_EXTERNAL_KEY,
     ENABLE_DUMP_TRACE_LOG,
     EXTERNAL_API,
+    GA_TRACKING_ID_KEY,
     HTML_CODE_304,
     INIT_APP_DB_FILE,
     INIT_BASIC_CFG_FILE,
     LAST_REQUEST_TIME,
     LOG_LEVEL,
     MAIN_THREAD,
+    NO_CACHING_ENDPOINTS,
     PORT,
     PROCESS_QUEUE,
     REQUEST_THREAD_ID,
@@ -57,7 +62,7 @@ from ap.common.constants import (
     FlaskGKey,
     MaxGraphNumber,
 )
-from ap.common.ga import GA, GA_TRACKING_ID, VERSION_FILE_NAME
+from ap.common.ga import GA, GA_TRACKING_ID, VERSION_FILE_NAME, AppGroup, AppSource, get_app_group
 from ap.common.jobs.scheduler import CustomizeScheduler
 from ap.common.logger import log_execution_time
 from ap.common.path_utils import count_file_in_folder, make_dir, resource_path
@@ -71,13 +76,48 @@ from ap.common.yaml_utils import (
     YAML_CONFIG_PROC_FILE_NAME,
     YAML_START_UP_FILE_NAME,
     BasicConfigYaml,
+    StartupSettings,
 )
 from ap.equations.error import FunctionErrors, FunctionFieldError
-from ap.script.migrate_delta_time import migrate_delta_time_in_cfg_trace_key
-from ap.script.migrate_m_function import migrate_m_function_data
-from ap.script.migrate_m_unit import migrate_m_unit_data
 
 logger = logging.getLogger(__name__)
+
+# Enable pandas copy on write optimization
+# See more: <https://pandas.pydata.org/docs/user_guide/copy_on_write.html#copy-on-write-optimizations>
+pd.options.mode.copy_on_write = True
+
+# Should raise exception if we ever do this operation: df[a][b] = 2
+# Because it might not modify dataframe.
+pd.options.mode.chained_assignment = 'raise'
+
+# Experiment this.
+# future.infer_string Whether to infer sequence of str objects as pyarrow string dtype,
+# which will be the default in pandas 3.0 (at which point this option will be deprecated).
+# <https://github.com/pandas-dev/pandas/issues/60113>
+pd.options.future.infer_string = False
+
+
+# BRIDGE STATION - Refactor DN & OSS version
+# get app version
+version_file = resource_path(VERSION_FILE_NAME) or os.path.join(os.getcwd(), VERSION_FILE_NAME)
+with open(version_file) as f:
+    rows = f.readlines()
+    rows.reverse()
+    app_ver = rows.pop()
+    if '%%VERSION%%' in app_ver:
+        app_ver = 'v00.00.000.00000000'
+
+    config_ver = str(rows.pop()).strip('\n') if len(rows) else '0'
+    app_source = str(rows.pop()).strip('\n').replace('%%SOURCE%%', '') if len(rows) else AppSource.DN.value
+    app_source = app_source if app_source else AppSource.DN.value
+
+    # use global flag for app_version
+    is_internal_version = app_source == AppSource.DN.value
+
+    logger.info(f'app_ver: {app_ver}')
+    logger.info(f'config_ver: {config_ver}')
+    logger.info(f'app_source: {app_source}')
+
 
 dic_config = {
     MAIN_THREAD: None,
@@ -103,7 +143,15 @@ max_graph_config = {
 
 
 class BaseSqlalchemy(DeclarativeBase):
-    pass
+    metadata = MetaData(
+        naming_convention={
+            'ix': 'ix_%(column_0_label)s',
+            'uq': 'uq_%(table_name)s_%(column_0_name)s',
+            'ck': 'ck_%(table_name)s_`%(constraint_name)s`',
+            'fk': 'fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s',
+            'pk': 'pk_%(table_name)s',
+        },
+    )
 
 
 # set to NullPool until we know how to handle QueuePool
@@ -202,25 +250,11 @@ def create_app(object_name=None, is_main=False):
     from .ridgeline_plot import create_module as ridgeline_create_module
     from .sankey_plot import create_module as sankey_create_module
     from .scatter_plot import create_module as scatter_plot_create_module
-    from .script.migrate_cfg_data_source_csv import migrate_cfg_data_source_csv
-    from .script.migrate_cfg_process import migrate_cfg_process
-    from .script.migrate_cfg_process_column import migrate_cfg_process_column
-    from .script.migrate_csv_datatype import migrate_csv_datatype
-    from .script.migrate_csv_dummy_datetime import migrate_csv_dummy_datetime
-    from .script.migrate_csv_save_graph_settings import migrate_csv_save_graph_settings
-    from .script.migrate_process_file_name_column import (
-        migrate_cfg_process_add_file_name,
-        migrate_cfg_process_column_add_column_raw_dtype,
-        migrate_cfg_process_column_add_column_raw_name,
-        migrate_cfg_process_column_add_column_type,
-        migrate_cfg_process_column_add_parent_id,
-        migrate_cfg_process_column_change_all_generated_datetime_column_type,
-    )
     from .setting_module import create_module as setting_create_module
     from .table_viewer import create_module as table_viewer_create_module
     from .tile_interface import create_module as tile_interface_create_module
-    from .time_vis import create_module as time_vis_create_module
     from .trace_data import create_module as trace_data_create_module
+    from .waveform_plot import create_module as waveform_plot_create_module
 
     app = Flask(__name__)
     app.config.from_object(object_name)
@@ -299,7 +333,7 @@ def create_app(object_name=None, is_main=False):
     multiple_scatter_create_module(app)
     tile_interface_create_module(app)
     agp_create_module(app)
-    time_vis_create_module(app)
+    waveform_plot_create_module(app)
 
     app.add_url_rule('/', endpoint='tile_interface.tile_interface')
 
@@ -310,26 +344,27 @@ def create_app(object_name=None, is_main=False):
     is_default_log_level = default_log_level == ApLogLevel.INFO.name
     dic_yaml_config_instance[YAML_CONFIG_BASIC] = basic_config_yaml
     dic_yaml_config_instance[YAML_START_UP] = start_up_yaml
+    # BRIDGE STATION - Refactor DN & OSS version
+    dic_yaml_config_file[YAML_CONFIG_VERSION] = config_ver
 
-    lang = start_up_yaml.get_node(['setting_startup', 'language'], None)
-    sub_title = start_up_yaml.get_node(['setting_startup', 'subtitle'], '')
-    enable_ga_tracking = start_up_yaml.get_node(['setting_startup', 'enable_ga_tracking'], False)
-    enable_dump_trace_log = start_up_yaml.get_node(['setting_startup', ENABLE_DUMP_TRACE_LOG], False)
-    app.config['GA_TRACKING_ID'] = GA_TRACKING_ID if enable_ga_tracking else ''
-    app.config[ENABLE_DUMP_TRACE_LOG] = bool(enable_dump_trace_log)
-
+    startup_settings = StartupSettings.from_dict(start_up_yaml.dic_config.get('setting_startup', {}))
+    sub_title = startup_settings.subtitle
+    # app config
+    app.config[GA_TRACKING_ID_KEY] = GA_TRACKING_ID if startup_settings.enable_ga_tracking else ''
+    app.config[ENABLE_DUMP_TRACE_LOG] = bool(startup_settings.enable_dump_trace_log)
+    app.config[DISABLE_CONFIG_FROM_EXTERNAL_KEY] = bool(startup_settings.disable_config_from_external)
+    # language
+    lang = startup_settings.language
     if lang is None or not lang:
         lang = basic_config_yaml.get_node(['info', 'language'], False)
-
     lang = find_babel_locale(lang)
     lang = lang or app.config['BABEL_DEFAULT_LOCALE']
 
     # create prefix for cookie key to prevent using same cookie between ports when runiing app
     def key_port(key):
-        port = start_up_yaml.get_node(
-            ['setting_startup', 'port'],
-            basic_config_yaml.get_node(['info', 'port-no'], '7770'),
-        )
+        port = startup_settings.port
+        if not port:
+            port = basic_config_yaml.get_node(['info', 'port-no'], '7770')
         return f'{port}_{key}'
 
     def get_locale():
@@ -337,35 +372,15 @@ def create_app(object_name=None, is_main=False):
 
     Babel(app, locale_selector=get_locale)
 
-    version_file = resource_path(VERSION_FILE_NAME) or os.path.join(os.getcwd(), VERSION_FILE_NAME)
+    # BRIDGE STATION - Refactor DN & OSS version
+    user_group = os.environ.get('group', AppGroup.Dev.value)
+    user_group = get_app_group(app_source, user_group)
     ga_info = GA.get_ga_info(version_file)
     dic_yaml_config_file[YAML_CONFIG_VERSION] = ga_info.config_version
 
-    # Universal DB init
-    # init_db(app)
-
     if is_main:
-        # migrate csv datatype
-        migrate_csv_datatype(app.config[APP_DB_FILE])
-        migrate_csv_dummy_datetime(app.config[APP_DB_FILE])
-        migrate_csv_save_graph_settings(app.config[APP_DB_FILE])
-        migrate_cfg_data_source_csv(app.config[APP_DB_FILE])
-        migrate_cfg_process_add_file_name(app.config[APP_DB_FILE])
-        migrate_cfg_process_column_add_column_raw_name(app.config[APP_DB_FILE])
-        migrate_cfg_process_column_add_column_raw_dtype(app.config[APP_DB_FILE])
-        migrate_cfg_process_column_add_column_type(app.config[APP_DB_FILE])
-        migrate_cfg_process_column_add_parent_id(app.config[APP_DB_FILE])
-        migrate_cfg_process_column(app.config[APP_DB_FILE])
-        migrate_cfg_process(app.config[APP_DB_FILE])
-        migrate_cfg_process_column_change_all_generated_datetime_column_type(app.config[APP_DB_FILE])
-
-        # migrate function data
-        migrate_m_function_data(app.config[APP_DB_FILE])
-        # migrate delta_time
-        migrate_delta_time_in_cfg_trace_key(app.config[APP_DB_FILE])
-
-        # migrate m_unit
-        migrate_m_unit_data(app.config[APP_DB_FILE])
+        with app.app_context():
+            flask_migrate.upgrade()
 
     # start scheduler (Notice: start scheduler at the end , because it may run job before above setting info was set)
     if scheduler.state != STATE_STOPPED:
@@ -437,20 +452,6 @@ def create_app(object_name=None, is_main=False):
         if not is_ignore_content and request.blueprint != EXTERNAL_API:
             bind_user_info(request)
 
-            # if not dic_config.get(TESTING):
-            #     is_valid_browser, is_valid_version = check_client_browser(request)
-            #     if not is_valid_version:
-            #         # safari not valid version
-            #         g.is_valid_version = True
-            #
-            #     if not is_valid_browser:
-            #         # browser not valid
-            #         content = {
-            #             'title': _('InvalidBrowserTitle'),
-            #             'message': _('InvalidBrowserContent'),
-            #         }
-            #         return render_template('none.html', **content)
-
     @app.after_request
     def after_request_callback(response: Response):
         if 'event-stream' in str(request.accept_mimetypes):
@@ -463,14 +464,14 @@ def create_app(object_name=None, is_main=False):
         close_sessions()
 
         response.cache_control.public = True
+        if request.endpoint and request.endpoint in NO_CACHING_ENDPOINTS:
+            response.cache_control.no_cache = True
 
         # better performance
         if not request.content_type:
             response.cache_control.max_age = 60 * 5
             response.cache_control.must_revalidate = True
 
-        # check everytime (acceptable performance)
-        # response.cache_control.no_cache = True
         response.direct_passthrough = False
         response.add_etag()
         response.make_conditional(request)

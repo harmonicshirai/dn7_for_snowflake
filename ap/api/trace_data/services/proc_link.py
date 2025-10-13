@@ -146,9 +146,9 @@ def show_proc_link_info():
     """
     # count matched per edge
     dic_proc_cnt = {}
-    trans = [TransactionData(proc.id) for proc in CfgProcess.get_all_ids()]
+    trans = [TransactionData(proc_id) for proc_id in CfgProcess.get_all_ids()]
     for tran_data in trans:
-        with DbProxy(gen_data_source_of_universal_db(tran_data.process_id), True) as db_instance:
+        with DbProxy(gen_data_source_of_universal_db(tran_data.process_id)) as db_instance:
             data_count = 0
             if tran_data.is_table_exist(db_instance):
                 data_count = tran_data.count_data(db_instance)
@@ -195,9 +195,12 @@ def update_proc_link_count(dic_count):
     logger.debug('[ProcLinkCount] Done Update proc link count proc id')
 
 
-def proc_link_count_job(is_user_request: bool = False):
+def proc_link_count_job(is_user_request: bool = False, run_time: Optional[datetime] = None):
     job_id = JobType.PROC_LINK_COUNT.name
-    run_time = datetime.now()
+
+    if run_time is None:
+        run_time = datetime.now()
+
     if not is_user_request:
         job_id += '_ONCE_PER_DAY'
         exist_job = scheduler.get_job(job_id)
@@ -262,7 +265,7 @@ def add_restructure_indexes_job(process_id=None, delay: int = 0):
     """
     add job to handle indexes restructure of processes
     """
-    proc_ids = [process_id] if process_id else [proc.id for proc in CfgProcess.get_all_ids()]
+    proc_ids = [process_id] if process_id else CfgProcess.get_all_ids()
 
     for proc_id in proc_ids:
         run_time = datetime.now().astimezone(utc)

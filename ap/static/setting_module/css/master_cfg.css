@@ -341,3 +341,12 @@
 .jexcel .daterangepicker .ranges li:hover {
     background-color: #357ebd !important;
 }
+
+#graphConfigTable .daterangepicker {
+    position: fixed !important;
+}
+
+#graphConfigTable.jexcel_container .daterangepicker:before,
+.daterangepicker:after {
+    display: none !important;
+}

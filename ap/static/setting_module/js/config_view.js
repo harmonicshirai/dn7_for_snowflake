@@ -36,6 +36,7 @@ const csvResourceElements = {
     csvIsTranspose: '#csvIsTranspose',
     optionalFunction: '#optionalFunction',
     withImportFlag: '#withImportFlag',
+    changeAllFreqSameDSFlag: '#changeAllFreqSameDSFlag',
     delimiter: 'input[type="radio"][name="fileType"]:checked',
     fileTypeAuto: '#fileTypeAuto',
     csv: '#fileTypeCSV',
@@ -59,6 +60,8 @@ const eles = {
     useOSTZOption: '#useOSTZOption',
     useOSTZConfirmBtn: '#useOSTZConfirmBtn',
     contextMenuName: '[name=contextMenu]',
+    withImport: '#withImport',
+    changeAllFreqSameDS: '#changeAllFreqSameDS',
 };
 
 const dbConfigElements = {
@@ -69,6 +72,8 @@ const dbConfigElements = {
     i18nDbSourceEmpty: '#i18nDbSourceEmpty',
     i18nDbSourceExist: '#i18nDbSourceExist',
     sqliteDbSource: '#sqlite_dbname',
+    snowflakePrivateKeyFileInput: '#snowflake_private_key_file',
+    snowflakeSWPrivateKeyFileInput: '#snowflake_software_workshop_private_key_file',
 };
 
 const withImportConstants = {
@@ -89,70 +94,12 @@ const getAllDatabaseConfig = async () => {
     return json;
 };
 
-const changePollingFreq = (selected) => {
-    $(csvResourceElements.withImportFlag).hide();
-    const procLength = $("tr[name='procInfo']").length;
-    const pf = $(selected).val();
-    if (procLength > 0) {
-        $(csvResourceElements.withImportFlag).show();
-    }
-    $('#btn-confirm-register').attr('data-item-id', 'CONFIRM_DB');
-    $('#btn-confirm-register').attr('data-pf', pf);
-    $('#register-confirm-modal').modal('show');
-};
 // hide loading screen
 const loading = $('#configLoadingScreen');
 loading.css('display', 'none');
 
 $(() => {
-    $('#withImport').on('change', (evt) => {
-        const isChecked = $(evt.target).is(':checked');
-        if (isChecked) {
-            $('#btn-confirm-register').attr('data-with-import', withImportConstants.YES);
-        } else {
-            $('#btn-confirm-register').attr('data-with-import', withImportConstants.NO);
-        }
-        // $("#withImport").is(":checked")
-    });
-    // click to register db configuration
-    $('#db-config-register').click(() => {
-        if (validateDBName().isOk) {
-            $(csvResourceElements.withImportFlag).hide();
-            const procLength = $("tr[name='procInfo']").length;
-            if (procLength > 0) {
-                $(csvResourceElements.withImportFlag).show();
-            }
-            $('#btn-confirm-register').attr('data-item-id', 'CONFIRM_DB');
-            $('#register-confirm-modal').modal('show');
-        } else {
-            displayRegisterMessage('#alert-msg-db', {
-                message: validateDBName().message,
-                is_error: true,
-            });
-        }
-    });
-
-    // click to confirm register db infor
-    $('#btn-confirm-register').click(() => {
-        const section = $('#btn-confirm-register').attr('data-item-id');
-        const withImport = $('#btn-confirm-register').attr('data-with-import');
-        const pf = $('#btn-confirm-register').attr('data-pf');
-        if (section === 'CONFIRM_BASIC') {
-            RegistBasicConfig();
-        } else if (section === 'CONFIRM_DB') {
-            DB.setPollingFreq($(eles.pollingFreq).val());
-            UpdatePollingFreq(pf, withImport);
-        }
-    });
-
-    $('#register-confirm-modal').on('hidden.bs.modal', () => {
-        $(eles.pollingFreq).val(DB.getPollingFreq());
-    });
-
     stickyHeaders.load($('#dataLinkGroup'));
-
-    // set polling
-    DB.setPollingFreq($(eles.pollingFreq).val());
 
     collapseConfig();
     $('#userBookmarkBar').hide();
@@ -196,6 +143,7 @@ const clearOldValue = () => {
     // add prevent submit handling to button
     // instead of add disabled attribution
     updateBtnStyleWithValidation($(csvResourceElements.csvSubmitBtn), false);
+    $(eles.withImport).prop('checked', false);
 };
 
 const getDBItems = () => {
@@ -215,6 +163,7 @@ const getDBItems = () => {
 
 // Update polling freq
 const UpdatePollingFreq = (pf, withImport = 'NO') => {
+    // todo check this func
     let importFlg = false;
     if (withImport === 'YES') {
         importFlg = true;

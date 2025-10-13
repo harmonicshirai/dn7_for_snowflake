@@ -60,7 +60,7 @@
     {% include 'proc_config.html' %}
     {% include 'trace_config.html' %}
 
-    <div id="register-confirm-modal" class="modal fade in" data-backdrop="static" data-keyboard="false">
+    <div id="polling-frequency-confirm-modal" class="modal fade in" data-backdrop="static" data-keyboard="false">
         <div class="modal-dialog modal-confirm">
             <div class="modal-content">
                 <div class="modal-header">
@@ -71,16 +71,23 @@
                     <p class="modal-inform">
                         {{ _("Do you want to save changes and start to import data with configure at Process Config page?") }}
                     </p>
-                    <div class="custom-control custom-checkbox mb-3" id="withImportFlag" style="display: none;">
+                    <div class="custom-control custom-checkbox mb-3" id="withImportFlag">
                         <input type="checkbox" class="custom-control-input" id="withImport" name="with-import" />
                         <label class="custom-control-label modal-inform" for="withImport">{{ _("ImportData") }}</label>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <a id="btn-confirm-register" class="btn btn-primary" data-item-id="" data-dismiss="modal"
+                    <a
+                        id="btn-confirm-register"
+                        class="btn btn-primary"
+                        data-item-id=""
+                        onclick="PollingFrequencyOption.handleClickOkPollingFrequency()"
+                        data-dismiss="modal"
                         >{{ _("OK") }}</a
                     >
-                    <a class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</a>
+                    <a class="btn btn-secondary" id="btnCancelPollingFrequency" data-dismiss="modal"
+                        >{{ _("Cancel") }}</a
+                    >
                 </div>
             </div>
         </div>
@@ -119,6 +126,7 @@
 
     <!-- Config View JS -->
     <script src="{{ url_for('static', filename = 'common/js/database-config.js') }}"></script>
+    <script src="{{ url_for('setting_module.static', filename = 'js/polling_frequency.js') }}"></script>
     <script src="{{ url_for('setting_module.static', filename = 'js/config_view.js') }}"></script>
     <!-- VIS -->
     <script src="{{ url_for('static', filename = 'modules/vis/vis-network.min.js') }}"></script>

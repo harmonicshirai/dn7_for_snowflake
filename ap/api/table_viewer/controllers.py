@@ -9,7 +9,7 @@ from ap.common.common_utils import get_csv_delimiter
 from ap.common.constants import DBType
 from ap.common.path_utils import get_latest_files
 from ap.common.pydn.dblib import mssqlserver, oracle
-from ap.common.pydn.dblib.db_proxy import DbProxy
+from ap.common.pydn.dblib.db_proxy_read_only import ReadOnlyDbProxy
 from ap.common.services.csv_header_wrapr import add_suffix_if_duplicated
 from ap.common.services.http_content import json_dumps
 from ap.common.services.jp_to_romaji_utils import to_romaji
@@ -35,7 +35,7 @@ def get_column_names():
     if not data_source:
         return blank_output
 
-    with DbProxy(data_source) as db_instance:
+    with ReadOnlyDbProxy(data_source) as db_instance:
         if not db_instance or not table:
             return blank_output
 
@@ -78,7 +78,7 @@ def get_table_records():
         csv_detail = data_source.csv_detail
         cols_with_types, rows = get_csv_data(csv_detail, sort_column, sort_order, int(limit))
     else:
-        with DbProxy(data_source) as db_instance:
+        with ReadOnlyDbProxy(data_source) as db_instance:
             if not db_instance or not table_name:
                 return blank_output
 

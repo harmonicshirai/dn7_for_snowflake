@@ -94,7 +94,7 @@
         - fpp
       unavailable:
         - pca
-    tv:
+    wfp:
       recommends:
         - fpp
       unavailable:

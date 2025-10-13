@@ -86,11 +86,13 @@ const registerI18n = {
     i18nProgressPullData: 'Pull CSV Data',
     i18nErrorNoGetdate: $('#i18nErrorNoGetdate').text(),
     i18nScanning: 'Scanning',
+    i18nLoadingData: 'Loading',
 };
 
 const registerSteps = {
     IMPORTING: 'importing',
     SCANNING: 'SCANNING',
+    LOAD: 'LOAD',
 };
 
 const ICON_STATUS = {
@@ -176,7 +178,7 @@ async function validateInputUrlAndFile() {
  */
 const handleOnChangeFolderAndFileUrl = async (isVerifyUrl) => {
     // clear content before updating
-    $(procModalElements.procPreviewSection).html('');
+    resetPreviewSection();
 
     // remove add red border
     [registerFromFileEles.folderUrl, registerFromFileEles.refFileUrl].forEach((el) => {
@@ -185,8 +187,14 @@ const handleOnChangeFolderAndFileUrl = async (isVerifyUrl) => {
     hiddenPreviewContentData();
     removeExtendSections();
 
-    if (isVerifyUrl) {
-        const url = $(registerFromFileEles.folderUrl).val().trim();
+    const url = $(registerFromFileEles.folderUrl).val().trim();
+
+    // abort async running
+    if (!url) {
+        abortProcess();
+    }
+
+    if (isVerifyUrl && url) {
         const folderOrFileInfo = await checkFolderOrFile(url);
         const isLoadGUIFromUrl = !!getParamFromUrl('load_gui_from_url');
         // Show modal confirm import one data file of all files in the same folder
@@ -220,7 +228,14 @@ const handleOnChangeFolderAndFileUrl = async (isVerifyUrl) => {
         await handleResponseData(request);
         enableRegisterDataFileBtn();
     } catch (e) {
-        addMessengerToProgressBar(registerI18n.i18nScanning, ICON_STATUS.WARNING, registerSteps.SCANNING, true);
+        if (e.statusText == 'abort') {
+            // clear content when process is aborted
+            resetPreviewSection();
+            resetProgressBar();
+        } else {
+            console.log(e);
+            addMessengerToProgressBar(registerI18n.i18nScanning, ICON_STATUS.WARNING, registerSteps.SCANNING, true);
+        }
     }
 };
 
@@ -427,6 +442,7 @@ const getLatestRecord = (data) =>
 
             $.ajax({
                 ...option,
+                beforeSend: setThreadIDtoXMLHttpRequest,
                 success: (json) => {
                     resolve(json);
                 },
@@ -456,6 +472,7 @@ async function renderDatasourceConfig(data) {
 
     const datasourceNameElement = document.getElementById('databaseName');
     data.datasourceConfig.name = datasourceNameElement.value.trim();
+    data.datasourceConfig.polling_frequency = 180;
     data.datasourceConfig.csv_detail.is_file_path = urlInfo.isFile;
     datasourceNameElement.__cache__ = data.datasourceConfig;
 }
@@ -477,6 +494,8 @@ async function handleResponseData(request) {
     addMessengerToProgressBar(registerI18n.i18nScanning, ICON_STATUS.PROCESSING, registerSteps.SCANNING);
 
     const data = await request;
+    addMessengerToProgressBar(registerI18n.i18nScanning, ICON_STATUS.SUCCESS, registerSteps.SCANNING, true);
+    addMessengerToProgressBar(registerI18n.i18nLoadingData, ICON_STATUS.PROCESSING, registerSteps.LOAD);
 
     // render data source config before render process config
     await renderDatasourceConfig(data);
@@ -484,10 +503,10 @@ async function handleResponseData(request) {
     const processConfigs =
         /** @type {ProcessData[]} */
         data.datasourceConfig.master_type !== 'V2' ? await convertStructureData(data) : convertStructureDataV2(data);
+
     displayPreviewContentData();
     await renderProcessConfig(processConfigs);
-
-    addMessengerToProgressBar(registerI18n.i18nScanning, ICON_STATUS.SUCCESS, registerSteps.SCANNING, true);
+    addMessengerToProgressBar(registerI18n.i18nLoadingData, ICON_STATUS.SUCCESS, registerSteps.LOAD, true);
 }
 
 /**
@@ -545,9 +564,9 @@ function convertStructureDataV2(data) {
             data: {
                 columns: processConfig.cols,
                 is_csv: true,
-                name: processConfig.name,
-                name_en: processConfig.name_en,
-                name_jp: processConfig.name_jp,
+                name: `${data.datasourceConfig.name}_${processConfig.name}`,
+                name_en: `${data.datasourceConfig.name}_${processConfig.name_en}`,
+                name_jp: `${data.datasourceConfig.name}_${processConfig.name_jp}`,
                 name_local: processConfig.name_local,
                 shown_name: isShowJapaneseName ? processConfig.name_jp : processConfig.name_en,
 
@@ -583,27 +602,6 @@ async function renderProcessConfig(data) {
             processData.unique_rows_as_int,
             processData.unique_rows_as_int_cat,
         );
-
-        // processConfigSectionObj.render();
-        // if (index === 0) {
-        //     return;
-        //     // In case of main section, no need to render
-        //     generateProcessList(processData.data.columns, processData.rows, true, false, false, false);
-        //     // processConfigSectionObj = ProcessConfigSection.createProcessConfigSectionForMain(
-        //     //     processData.data,
-        //     //     processData.rows,
-        //     // );
-        // } else {
-        //     // In case of extend section, need to render
-        //     processConfigSectionObj = ProcessConfigSection.createProcessConfigSectionForExtend(
-        //         processData.data,
-        //         processData.rows,
-        //     );
-        //
-        //     processConfigSectionObj.render();
-        // }
-
-        // processConfigSectionObj.injectEvents();
     }
     // TODO: TuanNH handle uncheck file name
     // Uncheck of Filename in [Register by File] as default
@@ -629,13 +627,13 @@ const addMessengerToProgressBar = (
     }
     switch (status) {
         case ICON_STATUS.SUCCESS:
-            iconClass = 'fa-check';
+            iconClass = 'fas fa-check';
             break;
         case ICON_STATUS.WARNING:
-            iconClass = 'fa-triangle-exclamation';
+            iconClass = 'fas fa-triangle-exclamation';
             break;
         case ICON_STATUS.PROCESSING:
-            iconClass = 'fa-solid fa-spinner fa-spin';
+            iconClass = 'fas fa-spinner custom-spin';
             break;
         default:
             break;
@@ -647,7 +645,7 @@ const addMessengerToProgressBar = (
 
     const msgDiv = `
         <div class="d-flex align-items-center ${stepClass}">
-            <i class="fas ${iconClass}"></i><span>${msgContent}</span>
+            <i class="${iconClass}"></i><span>${msgContent}</span>
         </div>
     `;
     if (!modify) {
@@ -674,6 +672,10 @@ const resetProgressBar = () => {
 const resetPreviewTableContent = () => {
     procModalElements.processColumnsTableBody.empty();
     procModalElements.processColumnsSampleDataTableBody.empty();
+};
+
+const resetPreviewSection = () => {
+    $(procModalElements.procPreviewSection).html('');
 };
 
 /**
@@ -908,7 +910,18 @@ const redirectToPage = async (processIds, page) => {
     };
     const res = await fetchData(`/ap/api/setting/redirect_to_page`, JSON.stringify(data), 'POST');
     goToOtherPage(res.url, false);
-    location.reload();
+    resetPage();
+};
+
+/**
+ * Reset all shown element to be a new page
+ */
+const resetPage = () => {
+    registerFromFileEles.folderUrl.val('').trigger('change');
+    showHideRefFile(false);
+    resetProgressBar();
+    resetPreviewTableContent();
+    hiddenPreviewContentData();
 };
 
 /**
@@ -927,72 +940,6 @@ const redirectToPage = async (processIds, page) => {
 const updateDataRegisterStatus = (postDat) => {
     if (postDat.data.RegisterByFileRequestID !== window.RegisterByFileRequestID) return;
 
-    // switch (postDat.data.step) {
-    //     case registerSteps.GEN_DATA_TABLE:
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressGenDataTable,
-    //             ICON_STATUS.PROCESSING,
-    //             registerSteps.GEN_DATA_TABLE,
-    //         );
-    //         break;
-    //
-    //     case registerSteps.SCAN_FILE:
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressGenDataTable,
-    //             ICON_STATUS.SUCCESS,
-    //             registerSteps.GEN_DATA_TABLE,
-    //             true,
-    //         );
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanFile,
-    //             ICON_STATUS.PROCESSING,
-    //             registerSteps.SCAN_FILE,
-    //         );
-    //         break;
-    //
-    //     case registerSteps.SCAN_MASTER:
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanFile,
-    //             ICON_STATUS.SUCCESS,
-    //             registerSteps.SCAN_FILE,
-    //             true,
-    //         );
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanMaster,
-    //             ICON_STATUS.PROCESSING,
-    //             registerSteps.SCAN_MASTER,
-    //         );
-    //         break;
-    //
-    //     case registerSteps.SCAN_DATA_TYPE:
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanMaster,
-    //             ICON_STATUS.SUCCESS,
-    //             registerSteps.SCAN_MASTER,
-    //             true,
-    //         );
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanDataType,
-    //             ICON_STATUS.PROCESSING,
-    //             registerSteps.SCAN_DATA_TYPE,
-    //         );
-    //         break;
-    //
-    //     case registerSteps.PULL_CSV_DATA:
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressScanDataType,
-    //             ICON_STATUS.SUCCESS,
-    //             registerSteps.SCAN_DATA_TYPE,
-    //             true,
-    //         );
-    //         addMessengerToProgressBar(
-    //             registerI18n.i18nProgressPullData,
-    //             ICON_STATUS.PROCESSING,
-    //             registerSteps.PULL_CSV_DATA,
-    //         );
-    //         break;
-    // }
-
     // processing
     switch (postDat.data.status) {
         case REGISTER_JOB_STATUS.PROCESSING:
@@ -1010,7 +957,7 @@ const updateDataRegisterStatus = (postDat) => {
             );
             break;
 
-        case postDat.data.status === REGISTER_JOB_STATUS.FAILED:
+        case REGISTER_JOB_STATUS.FAILED:
             addMessengerToProgressBar(
                 registerI18n.i18nProgressImportingData,
                 ICON_STATUS.WARNING,
@@ -1020,7 +967,7 @@ const updateDataRegisterStatus = (postDat) => {
             );
             break;
 
-        case postDat.data.status === REGISTER_JOB_STATUS.DONE:
+        case REGISTER_JOB_STATUS.DONE:
             // modify processing to check icon
             addMessengerToProgressBar(
                 registerI18n.i18nProgressImportingData,

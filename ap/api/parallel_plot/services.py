@@ -193,7 +193,7 @@ def gen_graph_paracords(graph_param, dic_param, df=None):
         key=lambda x: len(x),
         reverse=True,
     )
-    relevant_path = relevant_path[0] if len(relevant_path) else None
+    relevant_path = relevant_path[0] if relevant_path else None
     dic_param[PROC_LINK_ORDER] = relevant_path
     dic_param = get_filter_on_demand_data(dic_param)
 
@@ -225,7 +225,7 @@ def gen_dic_data_from_df(df: DataFrame, graph_param: DicParam):
 def gen_dic_serial_data_from_df(df: DataFrame, dic_proc_cfgs, dic_param):
     dic_param[SERIAL_DATA] = {}
     for proc_id, proc_cfg in dic_proc_cfgs.items():
-        serial_cols = dic_proc_cfgs[proc_id].get_serials(column_name_only=False)
+        serial_cols = proc_cfg.get_serials(column_name_only=False)
         sql_labels = [gen_sql_label(serial_col.id, serial_col.column_name) for serial_col in serial_cols]
         if sql_labels and all(item in df.columns for item in sql_labels):
             dic_param[SERIAL_DATA][proc_id] = df[sql_labels].replace({np.nan: None})

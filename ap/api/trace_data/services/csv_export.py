@@ -275,7 +275,7 @@ def export_preprocessing(
     suffix = '...'
     dic_rename = {}
     for proc in graph_param.array_formval:
-        proc_cfg = graph_param.dic_proc_cfgs[proc.proc_id] if proc.proc_id in graph_param.dic_proc_cfgs else None
+        proc_cfg = graph_param.dic_proc_cfgs.get(proc.proc_id, None)
         if not proc_cfg:
             continue
 
@@ -413,7 +413,7 @@ def get_new_column_order(df, graph_param, options):
     dic_rename = {}
 
     for proc in graph_param.array_formval:
-        proc_cfg = graph_param.dic_proc_cfgs[proc.proc_id] if proc.proc_id in graph_param.dic_proc_cfgs else None
+        proc_cfg = graph_param.dic_proc_cfgs.get(proc.proc_id, None)
 
         if not proc_cfg:
             continue

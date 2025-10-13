@@ -22,12 +22,6 @@ PRIORITY_JOBS = [
 #       False: Don't need to check key between 2 job (key: job parameter).
 #       True: Need to check key between 2 job , if key is not the same , they can run parallel
 CONFLICT_PAIR = {
-    # (JobType.DEL_PROCESS.name, JobType.DEL_PROCESS.name),
-    # (JobType.DEL_PROCESS.name, JobType.GEN_GLOBAL.name),
-    # (JobType.DEL_PROCESS.name, JobType.RESTRUCTURE_INDEXES.name),
-    # (JobType.DEL_PROCESS.name, JobType.CSV_IMPORT.name),
-    # (JobType.DEL_PROCESS.name, JobType.FACTORY_IMPORT.name),
-    # (JobType.DEL_PROCESS.name, JobType.FACTORY_PAST_IMPORT.name),
     (JobType.GEN_GLOBAL.name, JobType.GEN_GLOBAL.name),
     (JobType.GEN_GLOBAL.name, JobType.RESTRUCTURE_INDEXES.name),
     # (JobType.GEN_GLOBAL.name, JobType.CSV_IMPORT.name),
@@ -39,6 +33,7 @@ CONFLICT_PAIR = {
 }
 
 CONFLICT_PAIR_JOBS_WITH_IDS = {
+    (JobType.UPDATE_TRANSACTION_TABLE.name, JobType.IMPORT_DATA.name),
     (JobType.UPDATE_TRANSACTION_TABLE.name, JobType.CSV_IMPORT.name),
     (JobType.UPDATE_TRANSACTION_TABLE.name, JobType.FACTORY_IMPORT.name),
     (JobType.UPDATE_TRANSACTION_TABLE.name, JobType.FACTORY_PAST_IMPORT.name),

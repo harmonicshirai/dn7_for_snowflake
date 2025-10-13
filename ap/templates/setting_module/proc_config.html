@@ -127,6 +127,9 @@
                                                     onclick="deleteProcess(this);"
                                                     type="button"
                                                     class="btn btn-secondary icon-btn"
+                                                    {% if not is_authorized %}
+                                                        disabled
+                                                    {% endif %}
                                                 >
                                                     <i class="fas fa-trash-alt icon-secondary"></i>
                                                 </button>

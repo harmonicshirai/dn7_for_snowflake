@@ -353,7 +353,7 @@ def add_jitter_for_kde(x, y):
     add_jitter = False
     min_val = 0.0
     max_val = 0.999
-    if xrng == min_val or yrng == min_val or np.abs(np.corrcoef(x, y)[0, 1]) > max_val:
+    if min_val in (xrng, yrng) or np.abs(np.corrcoef(x, y)[0, 1]) > max_val:
         add_jitter = True
 
     if add_jitter:

@@ -24,6 +24,7 @@ HALF_WIDTH_SPACE = ' '
 UNIXEPOCH = 'unixepoch'
 DOUBLE_COLON_CONNECTOR = '::'
 
+SQL_DAYS_AGO = 30
 SQL_COL_PREFIX = '__'
 SQL_IN_MAX = 900
 SQL_LIMIT = 5_000_000
@@ -37,7 +38,9 @@ REMOVED_OUTLIERS = 'outliers'
 CAST_INF_VALS = 'cast_inf_vals'
 DATA_TYPE_ESTIMATION_LIMIT = 10000
 
+GA_TRACKING_ID_KEY = 'GA_TRACKING_ID'
 ENABLE_DUMP_TRACE_LOG = 'enable_dump_trace_log'
+DISABLE_CONFIG_FROM_EXTERNAL_KEY = 'disable_config_from_external'
 
 YAML_CONFIG_BASIC = 'basic'
 YAML_START_UP = 'start_up'
@@ -113,6 +116,8 @@ API_DATETIME_FORMAT = '%Y-%m-%dT%H:%MZ'
 TERM_FORMAT = {'year': '%Y', 'month': '%Y-%m', 'week': DATE_FORMAT}
 FREQ_FOR_RANGE = {'year': 'M', 'month': 'D', 'week': 'H'}
 
+SOFTWARE_WORKSHOP_SHOW_MISSING_COLUMNS_ON_PREVIEW = True
+
 
 class ApLogLevel(Enum):
     DEBUG = auto()
@@ -148,7 +153,9 @@ class DBType(Enum):
     V2 = 'v2'
     V2_MULTI = 'v2_multi'
     V2_HISTORY = 'v2_history'
-    SOFTWARE_WORKSHOP = 'software_workshop'
+    POSTGRES_SOFTWARE_WORKSHOP = 'postgres_software_workshop'
+    SNOWFLAKE = 'snowflake'
+    SNOWFLAKE_SOFTWARE_WORKSHOP = 'snowflake_software_workshop'
 
     @classmethod
     def from_str(cls, s: str) -> Optional['DBType']:
@@ -163,7 +170,9 @@ class DBType(Enum):
             DBType.SQLITE,
             DBType.ORACLE,
             DBType.MYSQL,
-            DBType.SOFTWARE_WORKSHOP,
+            DBType.POSTGRES_SOFTWARE_WORKSHOP,
+            DBType.SNOWFLAKE_SOFTWARE_WORKSHOP,
+            DBType.SNOWFLAKE,
         ]
 
 
@@ -329,6 +338,7 @@ UNIQUE_SERIAL = 'unique_serial'
 UNIQUE_SERIAL_TRAIN = 'unique_serial_train'
 UNIQUE_SERIAL_TEST = 'unique_serial_test'
 WITH_IMPORT_OPTIONS = 'with_import'
+WITH_CHANGE_ALL_FREQ_SAME_DS = 'change_all_freq_same_ds'
 # GET_PARAM = 'get_param'
 PROCS = 'procs'
 CLIENT_TIMEZONE = 'client_timezone'
@@ -469,11 +479,17 @@ DIVIDE_CALENDAR_LABELS = 'divFormats'
 IS_DIVIDE_BY_CATEGORY = 'is_divide_by_category'
 NUMERICAL_AGG_METHOD = 'numerical_agg_method'
 
+# json keys for ProcessColumnSchema
 #  data group type of column
 DATA_GROUP_TYPE = 'data_group_type'
 IS_SERIAL_NO = 'is_serial_no'
 IS_INT_CATEGORY = 'is_int_category'
 IS_JUDGE = 'is_judge'
+JUDGE_AVAILABLE = 'judge_available'
+JUDGE_FORMULA = 'judge_formula'
+JUDGE_POSITIVE_VALUE = 'judge_positive_value'
+JUDGE_POSITIVE_DISPLAY = 'judge_positive_display'
+JUDGE_NEGATIVE_DISPLAY = 'judge_negative_display'
 
 # X-Y Axis for SCP and HMp
 SCP_HMP_X_AXIS = 'SCP_HMP_X_AXIS'
@@ -624,6 +640,7 @@ class MemoizeKey(Enum):
 # error message for dangling jobs
 FORCED_TO_BE_FAILED = 'DANGLING JOB. FORCED_TO_BE_FAILED'
 DEFAULT_POLLING_FREQ = 180  # default is import every 3 minutes
+DEFAULT_SNOWFLAKE_POLLING_FREQ = 3600  # default is import every 1 hour
 
 
 class CfgConstantType(Enum):
@@ -634,7 +651,6 @@ class CfgConstantType(Enum):
     # GUI_TYPE = 1
     # FILTER_REGEX = 2
     # PARTNO_LIKE = 3
-    POLLING_FREQUENCY = auto()
     ETL_JSON = auto()
     UI_ORDER = auto()
     USE_OS_TIMEZONE = auto()
@@ -760,6 +776,29 @@ class ProcessCfgConst(Enum):
     PROC_COLUMNS = 'columns'
     DATA_SOURCE_ID = 'data_source_id'
     PROC_NAME_EN = 'name_en'
+    PROC_NAME = 'name'
+    TABLE_NAME = 'table_name'
+    FACT_ID = 'process_factid'
+    MASTER_TYPE = 'master_type'
+    IS_IMPORT = 'is_import'
+    NAME_JP = 'name_jp'
+    NAME_LOCAL = 'name_local'
+    CHILD_EQUIP_ID = 'child_equip_id'
+
+
+class ProcessColumnConst(Enum):
+    COLUMN_TYPE = 'column_type'
+    IS_GET_DATE = 'is_get_date'
+    IS_DUMMY_DATETIME = 'is_dummy_datetime'
+    IS_SERIAL_NO = 'is_serial_no'
+    IS_MAIN_SERIAL_NO = 'is_main_serial_no'
+    IS_AUTO_INCREMENT = 'is_auto_increment'
+    PREDICT_TYPE = 'predict_type'
+    DATA_TYPE = 'data_type'
+    ROMAJI = 'romaji'
+    CHECK_SAME_VALUE = 'check_same_value'
+    IS_CHECKED = 'is_checked'
+    IS_SHOW = 'is_show'
 
 
 class EFAColumn(Enum):
@@ -802,7 +841,8 @@ CAST_DATA_TYPE_ERROR_MSG = 'Cast Data Type Error'
 
 DATA_TYPE_ERROR_MSG = 'There is an error with the data type.'
 DATA_TYPE_DUPLICATE_MSG = 'There are duplicate records in the data file.'
-DATA_TYPE_ERROR_EMPTY_DATA = 'The data file is empty.'
+IMPORT_CSV_EMPTY_DATA = 'The data file is empty.'
+IMPORT_FACTOR_EMPTY_DATA = 'The database table is empty'
 
 
 class DataImportErrorTypes(Enum):
@@ -950,7 +990,6 @@ TRACE_TIME = 'traceTime'
 IS_GRAPH_LIMITED = 'isGraphLimited'
 
 IMAGES = 'images'
-TABLE_PROCESS_NAME = 'table_process'
 
 # language
 LANGUAGES = [
@@ -1075,8 +1114,7 @@ ID = 'id'
 ROWID = 'rowid'
 IS_USE_DUMMY_DATETIME = 'is_use_dummy_datetime'
 ENG_NAME = 'en_name'
-IS_GET_DATE = 'is_get_date'
-IS_DUMMY_DATETIME = 'is_dummy_datetime'
+
 LIST_PROCS = 'list_procs'
 GRAPH_FILTER_DETAILS = 'graph_filter_detail_ids'
 
@@ -1532,6 +1570,10 @@ SCHEDULER_DB = 'scheduler.sqlite3'
 START_TIME_COL = 'start_time_col'
 END_TIME_COL = 'end_time_col'
 
+MEASUREMENTS_KEY = 'MEASUREMENTS'
+STRING_MEASUREMENTS_KEY = 'STRING_MEASUREMENTS'
+COMPONENTS_KEY = 'COMPONENTS'
+
 
 class MasterDBType(BaseEnum):
     EFA = auto()
@@ -1545,12 +1587,16 @@ class MasterDBType(BaseEnum):
     SOFTWARE_WORKSHOP_HISTORY = auto()
 
     @classmethod
-    def is_v2_group(cls, master_type: str):
+    def is_v2_group(cls, master_type: str) -> bool:
         return master_type in [cls.V2.name, cls.V2_MULTI.name, cls.V2_HISTORY.name, cls.V2_MULTI_HISTORY.name]
 
     @classmethod
-    def is_efa_group(cls, master_type: str):
+    def is_efa_group(cls, master_type: str) -> bool:
         return master_type in [cls.EFA.name, cls.EFA_HISTORY.name]
+
+    @classmethod
+    def is_software_workshop(cls, master_type: str) -> bool:
+        return master_type in [cls.SOFTWARE_WORKSHOP_MEASUREMENT.name, cls.SOFTWARE_WORKSHOP_HISTORY.name]
 
     def get_data_type(self):
         if self in [self.SOFTWARE_WORKSHOP_MEASUREMENT, self.V2, self.V2_MULTI, self.EFA]:
@@ -1559,6 +1605,10 @@ class MasterDBType(BaseEnum):
             return 'history'
 
         return None
+
+    @classmethod
+    def has_key(cls, key_name):
+        return key_name in cls.__members__
 
 
 OSERR = {22: 'Access denied', 2: 'Folder not found', 20: 'Not a folder'}
@@ -1867,6 +1917,7 @@ class AnnounceEvent(Enum):
     BACKUP_DATA_FINISHED = auto()
     RESTORE_DATA_FINISHED = auto()
     TRANSACTION_UPDATED = auto()
+    PROCESS_BULK_REGISTER = auto()  # softwareworkshop bulk insert processes
 
 
 class JobType(Enum):
@@ -1874,7 +1925,6 @@ class JobType(Enum):
         return str(self.name)
 
     # 1,2 is priority
-    DEL_PROCESS = 1
     USER_BACKUP_DATABASE = 2
     USER_RESTORE_DATABASE = 3
     CSV_IMPORT = 4
@@ -1898,6 +1948,45 @@ class JobType(Enum):
     PERIODICALLY_COMPUTE_PROCESS_CACHE = 22
     PERIODICALLY_COMPUTE_ALL_PROCESSES_CACHE = 23
     PERIODICALLY_COMPUTE_ALL_TRACES_CACHE = 24
+    PULL_DATA = 25
+    IMPORT_DATA = 26
+
+    @classmethod
+    def jobs_include_process_id(cls):
+        return [
+            cls.USER_BACKUP_DATABASE,
+            cls.USER_RESTORE_DATABASE,
+            cls.CSV_IMPORT,
+            cls.FACTORY_IMPORT,
+            cls.FACTORY_PAST_IMPORT,
+            cls.RESTRUCTURE_INDEXES,
+            cls.UPDATE_TRANSACTION_TABLE,
+            cls.IMPORT_DATA,
+        ]
+
+    @classmethod
+    def jobs_include_data_source_id(cls):
+        return [
+            cls.PULL_DATA,
+        ]
+
+    @classmethod
+    def jobs_can_increase_disk_usage(cls):
+        return [
+            cls.CSV_IMPORT,
+            cls.FACTORY_IMPORT,
+            cls.FACTORY_PAST_IMPORT,
+            cls.PULL_DATA,
+            cls.IMPORT_DATA,
+        ]
+
+    @classmethod
+    def polling_freq_interval_data_jobs(cls):
+        return [
+            cls.CSV_IMPORT,
+            cls.FACTORY_IMPORT,
+            cls.IMPORT_DATA,
+        ]
 
 
 class ListenNotifyType(BaseEnum):
@@ -2093,3 +2182,14 @@ class NegRatio(BaseEnum):
     Y = 'y'
     JUDGE_OK = 'OK'
     JUDGE_NG = 'NG'
+
+
+DB_LOCKED_MSG = 'database is locked'
+
+# no caching for config/filter/master page
+# refer to request.endpoint
+NO_CACHING_ENDPOINTS = [
+    'setting_module.config_screen',
+    'setting_module.filter_config',
+    'setting_module.master',
+]

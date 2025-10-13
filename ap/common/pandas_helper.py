@@ -121,3 +121,38 @@ def check_if_array_is_repeating(array: np.ndarray) -> bool:
     if array.shape[0] == 0 or (array[0] == array).all():
         array_has_same_value = True
     return array_has_same_value
+
+
+def pandas_concat_with_filter_empty(dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    """Concat multiple dataframe into a single one. Avoiding empty ones.
+
+    >>> pandas_concat_with_filter_empty([])
+    Empty DataFrame
+    Columns: []
+    Index: []
+    >>> pandas_concat_with_filter_empty([pd.DataFrame()])
+    Empty DataFrame
+    Columns: []
+    Index: []
+    >>> pandas_concat_with_filter_empty([pd.DataFrame({'a': [1]})])
+       a
+    0  1
+    >>> pandas_concat_with_filter_empty([pd.DataFrame({'a': [1]}), pd.DataFrame({'a': [2]})])
+       a
+    0  1
+    1  2
+    """
+
+    if not len(dfs):
+        return pd.DataFrame()
+
+    columns = dfs[0].columns
+
+    dfs = [df for df in dfs if len(df)]
+    if not dfs:
+        return pd.DataFrame(columns=columns)
+
+    if len(dfs) == 1:
+        return dfs[0]
+
+    return pd.concat(dfs, ignore_index=True)

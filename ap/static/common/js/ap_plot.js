@@ -26,6 +26,14 @@ class APPlot {
     }
 
     /**
+     * show hover definition
+     * @abstract
+     */
+    get onHover() {
+        throw new Error('Not implemented');
+    }
+
+    /**
      *  default setting of plot
      *  @returns {Object}
      */

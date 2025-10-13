@@ -53,7 +53,11 @@ class Config(object):
         'threadpool': CustomizeThreadPoolExecutor(100),
     }
 
-    SCHEDULER_JOB_DEFAULTS = {'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 2 * 60}
+    # misfire_grace_time set to None so that jobs will execute no matter how late they are
+    # if set to any integer value x, jobs will be missed if they are late for x seconds
+    # References: https://apscheduler.readthedocs.io/en/3.x/modules/job.html
+    # https://apscheduler.readthedocs.io/en/3.x/userguide.html#missed-job-executions
+    SCHEDULER_JOB_DEFAULTS = {'coalesce': True, 'max_instances': 1, 'misfire_grace_time': None}
     VERSION_FILE_PATH = resource_path('VERSION')
     BASE_DIR = basedir
 

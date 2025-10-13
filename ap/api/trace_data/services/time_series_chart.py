@@ -441,10 +441,7 @@ def get_summary_infos(dic_param):
 
 def get_neg_ratio(dic_param):
     # if in dict plot have neg_ratio then return neg_ratio if not then return None
-    return [
-        plot[NegRatio.NEG_RATIO.value] if NegRatio.NEG_RATIO.value in plot else None
-        for plot in dic_param[ARRAY_PLOTDATA]
-    ]
+    return [plot.get(NegRatio.NEG_RATIO.value, None) for plot in dic_param[ARRAY_PLOTDATA]]
 
 
 @log_execution_time()

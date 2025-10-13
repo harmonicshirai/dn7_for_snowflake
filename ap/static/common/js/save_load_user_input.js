@@ -606,7 +606,7 @@ const saveLoadUserInput = (
             if (data.name === 'DATETIME_RANGE_PICKER') {
                 const { startDate, startTime, endDate, endTime } = splitDateTimeRange(data.value);
                 if (!startTime && !endTime) {
-                    data.value = `${startDate} 00:00 ${DATETIME_PICKER_SEPARATOR} ${endDate} 00:00`;
+                    data.value = `${startDate} 00:00${DATETIME_PICKER_SEPARATOR}${endDate} 00:00`;
                 }
             }
 
@@ -1125,7 +1125,7 @@ const saveLoadUserInput = (
 
     const handlerSettingDefaultDivide = (data, srcSetting) => {
         // Ignore load default datetime ranges
-        if (isLoadNew || !srcSetting || srcSetting.isJump) {
+        if (!srcSetting || srcSetting.isJump) {
             return;
         }
         const currentPage = getCurrentPage();
@@ -1800,39 +1800,6 @@ const createOrUpdateSetting = (settingDat, inplace = true, excludeColumns = []) 
         },
     });
 };
-const setModalOverlay = () => {
-    $(document).on(
-        {
-            'show.bs.modal': function () {
-                const zIndex = 1040 + 10 * $('.modal:visible').length;
-                $(this).css('z-index', zIndex);
-                setTimeout(() => {
-                    $('.modal-backdrop')
-                        .not('.modal-stack')
-                        .css('z-index', zIndex - 1)
-                        .addClass('modal-stack');
-                }, 0);
-            },
-            'hidden.bs.modal': function () {
-                if ($('.modal:visible').length > 0) {
-                    // restore the modal-open class to the body element, so that scrolling works
-                    // properly after de-stacking a modal.
-                    setTimeout(() => {
-                        $(document.body).addClass('modal-open');
-                    }, 0);
-                }
-            },
-        },
-        '.modal',
-    );
-    // $(document).on('show.bs.modal', '.modal', function (event) {
-    // 	var zIndex = 1040 + (10 * $('.modal:visible').length);
-    // 	$(this).css('z-index', zIndex);
-    // 	setTimeout(function() {
-    // 		$('.modal-backdrop').not('.modal-stack').css('z-index', zIndex - 1).addClass('modal-stack');
-    // 	}, 0);
-    // });
-};
 
 const saveOriginalSetting = () => {
     const inputForms = $('form');
@@ -2125,8 +2092,6 @@ $(document).ready(() => {
         clearSettingID();
         updateUserNameForSettingModal();
     });
-
-    setModalOverlay();
 
     const dragAreaCls = '.import-drag-area';
     const selectFileBtnId = '#importSelectFileBtn';
@@ -2509,23 +2474,23 @@ const setDefaultCyclicTermConfig = (rangeTime, isSetDefaultCyclicTerm) => {
     switch (divideOption) {
         case divideOptions.category:
             isChangeDatetimeRange = true;
-            $('#datetimeRangePicker').val(rangeTime);
+            $('#datetimeRangePicker').val(rangeTime).trigger('change');
             break;
         case divideOptions.cyclicTerm:
             isChangeDatetimeRange = true;
-            $('#cyclicTermDatetimePicker').val(DatetimeRange[0]);
+            $('#cyclicTermDatetimePicker').val(DatetimeRange[0]).trigger('change');
             break;
         case divideOptions.directTerm:
             isChangeDatetimeRange = true;
-            $('#datetimeList input:first[name=DATETIME_RANGE_PICKER]').val(rangeTime);
+            $('#datetimeList input:first[name=DATETIME_RANGE_PICKER]').val(rangeTime).trigger('change');
             break;
         case divideOptions.cyclicCalender:
             isChangeDatetimeRange = true;
-            $('#datetimeRangePickercyclicCalender').val(rangeTime);
+            $('#datetimeRangePickercyclicCalender').val(rangeTime).trigger('change');
             break;
         default:
             isChangeDatetimeRange = true;
-            $('input:visible[name=DATETIME_RANGE_PICKER]').val(rangeTime);
+            $('input:visible[name=DATETIME_RANGE_PICKER]').val(rangeTime).trigger('change');
     }
     if (isChangeDatetimeRange) {
         $('#datetimeRangeShowValue').text(rangeTime);

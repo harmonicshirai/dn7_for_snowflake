@@ -822,8 +822,8 @@ def gen_rlp_kde(dic_param):
             fmt[sensor_id] = append_series(fmt[sensor_id], array_x.reset_index(drop=True))
             ridgeline[RL_KDE] = calculate_kde_for_ridgeline(array_x, grid_points, height=3, use_hist_counts=True)
 
-    for idx in fmt:
-        fmt[idx] = get_fmt_from_array(fmt[idx])
+    for idx, value in fmt.items():
+        fmt[idx] = get_fmt_from_array(value)
     dic_param[FMT] = fmt
     res = transform_rlp_kde(dic_param)
     return res
@@ -1192,7 +1192,7 @@ def compute_ng_rate(df, dic_param, graph_param, groups=None):
     ng_condition_val = cast_data_type(ng_condition_val, df[judge_col_name].dtype)
 
     sub_dfs = [(None, df[columns])]
-    if len(facets_label):
+    if facets_label:
         sub_dfs = df[columns].groupby(facets_label)
         sub_dfs = [(x, sub_dfs.get_group(x)) for x in sub_dfs.groups]
 

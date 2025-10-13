@@ -925,10 +925,6 @@ msgid "SHOW_GEN_GLOBAL"
 msgstr "లింక్ యొక్క జనరేషన్ ఉద్యోగం ID"
 
 # ap/templates/setting_module/background_process.html
-msgid "DEL_PROCESS"
-msgstr "ప్రాసెస్ సమాచారం తొలగించడం"
-
-# ap/templates/setting_module/background_process.html
 msgid "FACTORY_IMPORT"
 msgstr "ఫ్యాక్టరీ డేటాను దిగుమతి చేయండి"
 
@@ -1522,6 +1518,10 @@ msgstr "వీక్షకుడు"
 msgid "ImportData"
 msgstr "డేటాను దిగుమతి చేయండి"
 
+# ap/template/setting_module/config.html
+msgid "ChangeAllFreqSameDataSourceType"
+msgstr "Change All Same Data Source Type"
+
 # ap/template/setting_module/trace_config.html
 msgid ""
 "Based on the set config information, generating the ID for linking the "
@@ -1568,6 +1568,14 @@ msgstr ""
 "డేటాబేస్ /CSV డేటాను దిగుమతి చేసే ఫైల్ కోసం సెట్టింగులు సేవ్ చేయబడతాయి. "
 "సెట్టింగ్ పేజీకి వెళ్లి, డేటాను దిగుమతి చేయడానికి దిగుమతి డేటా యొక్క "
 "నిలువు వరుసలను సెట్ చేయండి."
+
+#: ap/api/setting_module/controllers.py
+msgid "changedPollingFreq"
+msgstr "Polling frequency has been changed."
+
+#: ap/api/setting_module/controllers.py
+msgid "Failed to change polling frequency"
+msgstr "Failed to change polling frequency."
 
 #: ap/template/analyze/hotelling_tsquare.html
 msgid "2 or more variables should be selected for PCA"
@@ -5125,8 +5133,8 @@ msgstr "Backup data was finished."
 msgid "Restore data was finished."
 msgstr "Restore data was finished."
 
-msgid "Software Workshop Postgres"
-msgstr "Software Workshop Postgres"
+msgid "Software Workshop"
+msgstr "Software Workshop"
 
 msgid "Unit"
 msgstr "Unit"
@@ -5536,6 +5544,10 @@ msgstr ""
 "setting failed. Do you force it to be 'Judge'? (If so, please modify the "
 "conversion formula as appropriate)"
 
+#: ap/templates/modal.html
+msgid "SelectJudgeDataTypeWarningFilterChangeModalMsg"
+msgstr "You will need to reset filter settings."
+
 #: ap/templates/i18n.html
 msgid "InvalidInputJudgeMsg"
 msgstr "Invalid input detected, reverting to original value."
@@ -5549,4 +5561,92 @@ msgstr ""
 #: ap/templates/i18n.html
 msgid "JudgeFormulaTitle"
 msgstr "Formula"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "softwareWorkshopPreviewLineGrpLabel"
+msgstr "Line Group"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "softwareWorkshopPreviewChildEqLabel"
+msgstr "Child Equip"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderLine"
+msgstr "Line Name (Line ID)"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderChildEq"
+msgstr "Child Equip (Child Equip ID)"
+
+#: ap/templates/i18n.html
+msgid "softwareWorkshopPreviewHeaderMasterType"
+msgstr "Master Type"
+
+#: ap/templates/i18n.html
+msgid "bulkImportSoftwareWorkshopButton"
+msgstr "Bulk data import"
+
+#: ap/templates/i18n.html
+msgid "processConfigInitSoftwareWorkshopButton"
+msgstr "Process Config"
+
+#: ap/templates/i18n.html
+msgid "masterTypeMeasurement"
+msgstr "Measurement"
+
+#: ap/templates/i18n.html
+msgid "masterTypeHistory"
+msgstr "History"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "registerProcessButton"
+msgstr "Register Processes"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "Software Workshop (on-premise)"
+msgstr "Software Workshop (on-premise)"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "RoleLabel"
+msgstr "Role"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "WarehouseLabel"
+msgstr "Warehouse"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "AccessTokenRadioLabel"
+msgstr "Access Token"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "KeypairRadioLabel"
+msgstr "Keypair"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakeAccessTokenLabel"
+msgstr "Access Token"
+
+#: ap/templates/waveform_plot/waveform_plot.html
+msgid "Waveform plot"
+msgstr "Waveform plot"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakePrivateKeyFilePathLabel"
+msgstr "Private Key File"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakePrivateKeyFilePwdLabel"
+msgstr "Key File Password"
+
+#: ap/templates/i18n.html
+msgid "Import From (UTC)"
+msgstr "Import From (UTC)"
+
+#: ap/templates/setting_module/db_config_modals.html
+msgid "SnowflakeAuthTypeLabel"
+msgstr "Authentication method"
+
+#: ap/templates/i18n.html ap/templates/setting_module/db_config.html
+msgid "DataSourceTypeSoftwareWorkshopSnowflake"
+msgstr "Software Workshop ETL (Snowflake)"
 

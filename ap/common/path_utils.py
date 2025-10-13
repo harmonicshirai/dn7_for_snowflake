@@ -485,3 +485,13 @@ def copy_file(source, target):
 
     shutil.copy2(source, target)
     return True
+
+
+def get_etl_scripts(etl_path):
+    """
+    get etl (r and python) scripts
+    """
+    try:
+        return get_files(directory=etl_path, depth_from=1, depth_to=1, file_name_only=True) or []
+    except (Exception, FileNotFoundError):
+        return []

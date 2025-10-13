@@ -694,7 +694,16 @@ class ParallelPlot {
         limit += 1;
         if (dimension.length && this.settings.orderBy === ParallelProps.orderBy.correlation && limit !== 0) {
             // order by correlation number of dimension
-            dimension.sort((a, b) => Math.abs(a.correlation) - Math.abs(b.correlation));
+            // make sure the objective col always exist in the dimension
+            dimension.sort((a, b) => {
+                if (a.dimID === this.objective.name) {
+                    return 1;
+                }
+                if (b.dimID === this.objective.name) {
+                    return -1;
+                }
+                return Math.abs(a.correlation) - Math.abs(b.correlation);
+            });
             dimension = [...dimension].reverse().slice(0, limit).reverse();
         }
         // objective variable in last column

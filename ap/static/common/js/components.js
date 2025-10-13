@@ -154,6 +154,9 @@ const updateI18nCommon = async () => {
         all: $('#i18nAll2').text(),
         duplicatedSerial: $('#i18nDuplicatedSerial').text(),
         duplicatedSerialHoverMsg: $('#i18nDuplicatedHoverMessage').text(),
+        softwareWorkshopPreviewHeaderLine: $('#i18nSoftwareWorkshopPreviewHeaderLine').text(),
+        softwareWorkshopPreviewHeaderChildEq: $('#i18nSoftwareWorkshopPreviewHeaderChildEq').text(),
+        softwareWorkshopPreviewHeaderMasterType: $('#i18nSoftwareWorkshopPreviewHeaderMasterType').text(),
     };
 };
 
@@ -979,6 +982,133 @@ const addGroupListCheckboxWithSearch = (parentId, id, label, itemIds, itemVals, 
     onchangeRequiredInput();
     objectiveInputEventHandle();
     // endProcSortable();
+};
+
+const searchItemETL = () => {
+    return `
+        <div class="d-flex">
+            <input class="form-control" id="search" placeholder="${i18nCommon.search}..">
+            <button type="button" id="setBtnSearchETL" class="btn simple-btn btn-setting">Set</button>
+            <button type="button" id="resetBtnSearchETL" class="btn simple-btn btn-setting">Reset</button>
+        </div>`;
+};
+
+const addGroupTableCheckboxWithSearch = (data) => {
+    const tableWrapper = document.createElement('div');
+    tableWrapper.id = 'tableWrapper';
+    const groupTable = document.createElement('table');
+    groupTable.id = 'equipTable';
+    groupTable.classList.add('table', 'table-bordered', 'table-striped', 'mx-auto', 'table-fixed');
+
+    const header = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+
+    const headerCheckbox = document.createElement('th');
+    headerCheckbox.style.width = '30px';
+
+    const divCustomCheckBox = document.createElement('div');
+    divCustomCheckBox.classList.add('custom-control', 'custom-checkbox', 'checkbox-position');
+
+    const checkboxInput = document.createElement('input');
+    checkboxInput.type = 'checkbox';
+    checkboxInput.id = 'groupTableCheckBoxHeader';
+    checkboxInput.classList.add('check-all-equip', 'custom-control-input', 'col-checkbox');
+
+    const labelCheckbox = document.createElement('label');
+    labelCheckbox.classList.add('custom-control-label');
+    labelCheckbox.setAttribute('for', checkboxInput.id);
+
+    divCustomCheckBox.appendChild(checkboxInput);
+    divCustomCheckBox.appendChild(labelCheckbox);
+
+    headerCheckbox.appendChild(divCustomCheckBox);
+    headerRow.appendChild(headerCheckbox);
+
+    const keys = [
+        i18nCommon.softwareWorkshopPreviewHeaderLine,
+        i18nCommon.softwareWorkshopPreviewHeaderChildEq,
+        i18nCommon.softwareWorkshopPreviewHeaderMasterType,
+    ];
+    keys.forEach((key) => {
+        const th = document.createElement('th');
+        th.textContent = key;
+        if (key === i18nCommon.softwareWorkshopPreviewHeaderMasterType) {
+            th.style.width = '15%';
+        }
+        headerRow.appendChild(th);
+    });
+
+    header.appendChild(headerRow);
+    groupTable.appendChild(header);
+
+    const tbody = document.createElement('tbody');
+
+    data.forEach((item, i) => {
+        const row = document.createElement('tr');
+        const checkboxCell = document.createElement('td');
+        checkboxCell.style.width = '30px';
+        checkboxCell.classList.add('cell-checkbox');
+
+        const divCustomCheckBox = document.createElement('div');
+        divCustomCheckBox.classList.add('custom-control', 'custom-checkbox', 'checkbox-position', 'cell-checkbox');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `groupTableCheckBox${i}`;
+        checkbox.classList.add('check-item', 'custom-control-input', 'col-checkbox');
+        checkbox.value = item.child_equip_id;
+        checkbox.setAttribute('data-table-name', item.table_name);
+        checkbox.setAttribute('data-master-type', item.master_type);
+
+        const labelCheckbox = document.createElement('label');
+        labelCheckbox.classList.add('custom-control-label');
+        labelCheckbox.setAttribute('for', checkbox.id);
+
+        divCustomCheckBox.appendChild(checkbox);
+        divCustomCheckBox.appendChild(labelCheckbox);
+
+        checkboxCell.appendChild(divCustomCheckBox);
+        row.appendChild(checkboxCell);
+
+        const lineTd = document.createElement('td');
+        lineTd.textContent = item.line;
+        const childEquipTd = document.createElement('td');
+        childEquipTd.classList.add('col-shorten-name');
+        childEquipTd.textContent = item.child_equip;
+        const dataTypeTd = document.createElement('td');
+        lineTd.classList.add('col-shorten-name');
+        dataTypeTd.textContent = $(`${SoftwareWorkshopMasterTypes[item.data_type.toUpperCase()].i18n}`).text();
+        row.appendChild(lineTd);
+        row.appendChild(childEquipTd);
+        row.appendChild(dataTypeTd);
+
+        tbody.appendChild(row);
+    });
+
+    groupTable.appendChild(tbody);
+    tableWrapper.appendChild(groupTable);
+    return tableWrapper;
+};
+
+const createGroupTable = (data, isSnowFlake) => {
+    const $groupTable = isSnowFlake ? $('#modal-db-snowflake_software_workshop').find('#groupTable') : $('#groupTable');
+    // Clear old equip table
+    $groupTable.children().remove();
+
+    // Generate new equip table
+    const groupTable = $groupTable[0];
+
+    const searchString = `${searchItemETL()}`;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(searchString, 'text/html');
+
+    const searchElem = doc.body.firstChild;
+    const tableGroupElem = addGroupTableCheckboxWithSearch(data);
+
+    groupTable.appendChild(searchElem);
+    groupTable.appendChild(tableGroupElem);
+    handleTableRowEvents('equipTable');
+    initChildEquipTableEvents();
 };
 
 const countVariables = (parentId, groupId) => {
@@ -2158,4 +2288,30 @@ const calculateWidthForJPNameEl = (targetUlEle) => {
         });
 
     return widthOfNameCols - 84; // 84 is width of default-width-sys-name
+};
+
+const handleTableRowEvents = (tableId) => {
+    const tbodyRow = $(`#${tableId}`).find('tbody tr');
+    function onMouseenter(e) {
+        const currentRow = $(e.currentTarget);
+        currentRow.addClass('hovered');
+    }
+
+    function onMouseleave(e) {
+        const currentRow = $(e.currentTarget);
+        currentRow.removeClass('hovered');
+    }
+
+    function onClick(e) {
+        if ($(e.target).hasClass('cell-checkbox') || $(e.target.parentElement).hasClass('cell-checkbox')) {
+            return;
+        }
+        const currentRow = $(e.currentTarget);
+        const checkItemElm = currentRow.find('input[type=checkbox]');
+        checkItemElm.prop('checked', !checkItemElm.is(':checked')).trigger('change');
+    }
+
+    tbodyRow.off('mouseenter').on('mouseenter', onMouseenter);
+    tbodyRow.off('mouseleave').on('mouseleave', onMouseleave);
+    tbodyRow.off('click').on('click', onClick);
 };

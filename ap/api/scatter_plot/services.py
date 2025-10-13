@@ -827,14 +827,11 @@ def split_df_by_time_range(dic_df_chunks, max_group=None, max_record_per_group=N
     dic_groups = {}
     max_group = max_group or len(dic_df_chunks)
 
-    count = 0
-    for key, df_group in dic_df_chunks.items():
+    for count, (key, df_group) in enumerate(dic_df_chunks.items()):
         # for key, df_group in df_groups.groups.items():
         if count >= max_group:
             break
-
         dic_groups[key] = df_group.head(max_record_per_group)
-        count += 1
 
     return dic_groups
 
@@ -1432,7 +1429,7 @@ def gen_map_xy_heatmap_matrix(x_name, y_name, all_x, all_y, graph):
     map_xy_array_z = map_xy_array_z[sorted_cols]
 
     missing_data = [None] * len(missing_y)
-    df_missing = pd.DataFrame({col: missing_data for col in map_xy_array_z.columns}, index=missing_y)
+    df_missing = pd.DataFrame(dict.fromkeys(map_xy_array_z.columns, missing_data), index=missing_y)
     map_xy_array_z = pd.concat([map_xy_array_z, df_missing]).sort_index()
 
     # limit 10K cells

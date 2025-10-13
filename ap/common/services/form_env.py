@@ -410,7 +410,7 @@ def parse_multi_filter_into_one(dic_form):
 
     # set default start process
     if START_PROC not in dic_parsed[COMMON] or is_start_proc_not_set:
-        list_of_end_procs = [proc[END_PROC] if END_PROC in proc else None for proc in array_formval]
+        list_of_end_procs = [proc.get(END_PROC, None) for proc in array_formval]
         list_of_end_procs = list(filter(lambda end_proc: end_proc, list_of_end_procs))
         dic_parsed[COMMON][START_PROC] = list_of_end_procs[0]
 
@@ -508,6 +508,7 @@ def bind_dic_param_to_class(
     dic_card_orders,
     dic_param,
     is_train_data=False,
+    is_order_by_time=True,
 ):
     dic_common = dic_param[COMMON]
 
@@ -611,6 +612,7 @@ def bind_dic_param_to_class(
         is_nominal_scale=dic_common.get(IS_NOMINAL_SCALE, True),
         nominal_vars=dic_common.get(NOMINAL_VARS, None),
         traincond_procs=train_cond_procs,
+        is_order_by_time=is_order_by_time,
     )
 
     # use the first end proc as start proc

@@ -40,7 +40,6 @@ def backup_db_data_from_key(
     with DbProxy(
         gen_data_source_of_universal_db(proc_id=transaction_data.process_id),
         True,
-        immediate_isolation_level=True,
     ) as db_instance:
         get_date_col = transaction_data.getdate_column.bridge_column_name
         df_from_db: pd.DataFrame = transaction_data.get_transaction_by_time_range(

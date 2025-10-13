@@ -7,7 +7,7 @@ import re
 import time
 from contextlib import suppress
 from itertools import islice
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -26,11 +26,7 @@ from ap.api.setting_module.services.data_import import (
 )
 from ap.api.setting_module.services.master_data_transform_pattern import ColumnRawNameRule
 from ap.api.setting_module.services.software_workshop_etl_services import (
-    get_code_name_mapping,
-    get_transaction_data_stmt,
-    measurements_table,
-    quality_measurements_table,
-    transform_df_for_software_workshop,
+    POSTGRES_SOFTWARE_WORKSHOP_DEF,
 )
 from ap.api.setting_module.services.v2_etl_services import (
     get_df_v2_process_single_file,
@@ -42,7 +38,6 @@ from ap.api.setting_module.services.v2_etl_services import (
     rename_sub_part_no,
 )
 from ap.common.common_utils import (
-    add_suffix_for_same_column_name,
     convert_eu_decimal_series,
     convert_numeric_by_type,
     get_csv_delimiter,
@@ -55,9 +50,12 @@ from ap.common.constants import (
     FILE_NAME,
     HALF_WIDTH_SPACE,
     IS_JUDGE,
+    JUDGE_AVAILABLE,
+    JUDGE_FORMULA,
     MAXIMUM_V2_PREVIEW_ZIP_FILES,
     PREVIEW_DATA_TIMEOUT,
     REVERSED_WELL_KNOWN_COLUMNS,
+    SOFTWARE_WORKSHOP_SHOW_MISSING_COLUMNS_ON_PREVIEW,
     SUB_PART_NO_DEFAULT_SUFFIX,
     SUB_PART_NO_PREFIX,
     SUB_PART_NO_SUFFIX,
@@ -69,6 +67,7 @@ from ap.common.constants import (
     DataType,
     DBType,
     MasterDBType,
+    ProcessColumnConst,
 )
 from ap.common.logger import log_execution_time
 from ap.common.memoize import CustomCache
@@ -83,6 +82,7 @@ from ap.common.path_utils import (
 )
 from ap.common.pydn.dblib import mssqlserver, oracle
 from ap.common.pydn.dblib.db_proxy import DbProxy, gen_data_source_of_universal_db
+from ap.common.pydn.dblib.db_proxy_read_only import ReadOnlyDbProxy
 from ap.common.services import csv_header_wrapr as chw
 from ap.common.services.csv_content import (
     check_exception_case,
@@ -103,7 +103,14 @@ from ap.common.services.normalization import (
     unicode_normalize,
 )
 from ap.common.timezone_utils import gen_dummy_datetime, gen_dummy_datetime_data
-from ap.detect_judge.core import JUDGE_AVAILABLE, JUDGE_FORMULA, get_judge_formula
+from ap.detect_judge.core import get_judge_formula
+from ap.etl.transform import TransformData
+from ap.etl.transform.pipeline import (
+    software_workshop_postgres_history_transform_pipeline,
+    software_workshop_postgres_measurement_transform_pipeline,
+    software_workshop_snowflake_history_transform_pipeline,
+    software_workshop_snowflake_measurement_transform_pipeline,
+)
 from ap.setting_module.models import (
     CfgDataSource,
     CfgProcess,
@@ -140,8 +147,8 @@ def get_latest_records(
     has_ct_col = True
     dummy_datetime_idx = None
     file_name_col_idx = None
-    is_gen_cols = []
     is_file_checker = False
+    data_source: Optional[CfgDataSource] = None
 
     if data_source_id:
         data_source: CfgDataSource = CfgDataSource.query.get(data_source_id)
@@ -212,6 +219,7 @@ def get_latest_records(
                 dummy_datetime_idx=dummy_datetime_idx,
                 file_name_idx=file_name_col_idx,
                 is_gen_cols=is_gen_cols,
+                master_type=master_type,
             )
 
         # sort columns
@@ -223,6 +231,10 @@ def get_latest_records(
         df_rows = dic_preview.get('content', None)
         previewed_files = dic_preview.get('previewed_files')
     else:
+        if current_process_id is not None:
+            proc_cfg: CfgProcess = CfgProcess.get_proc_by_id(int(current_process_id))
+            process_factid = process_factid or proc_cfg.process_factid
+            master_type = master_type or proc_cfg.master_type
         cols, df_rows, dict_column_name_and_unit = get_info_from_db(
             data_source,
             table_name,
@@ -242,9 +254,10 @@ def get_latest_records(
                 same_values,
                 column_raw_name=cols,
                 dict_column_name_and_unit=dict_column_name_and_unit,
+                master_type=master_type,
             )
         # format data
-        df_rows = convert_utc_df(df_rows, cols, data_types, data_source, table_name)
+        df_rows = convert_utc_df(df_rows, cols, data_types, data_source)
 
     # change name if romaji cols is duplicated
     cols_with_types, cols_duplicated = change_duplicated_columns(cols_with_types)
@@ -280,9 +293,9 @@ def get_latest_records(
     df_unique_as_real = pd.DataFrame()
     df_unique_as_int = pd.DataFrame()
     df_unique_as_int_cat = pd.DataFrame()
-    # TODO: This function should use normalize in a consistent manner
-    df_rows.columns = normalize_list(cols)
-    normalized_cols = normalize_list(cols)
+    col_names = [col['column_name'] for col in cols_with_types]
+    # TODO: How do we make sure col_names and df_rows.columns are in correct order?
+    df_rows.columns = col_names
     df_unique_sample_processing = df_rows.copy()
     if is_valid_list(df_rows):
         # check is judge
@@ -334,21 +347,22 @@ def get_latest_records(
                         df_rows[col] = df_rows[col].str.lower()
                     # fill na to '' for string column
                     df_rows[col] = df_rows[col].fillna('')
-            except Exception:
+            except Exception as e:
+                logger.exception(e)
                 continue
 
-        rows = transform_df_to_rows(normalized_cols, df_rows, limit)
+        rows = transform_df_to_rows(col_names, df_rows, limit)
         if is_csv_or_v2 and directory and (file_name_col_idx is not None):
             file_name_data = pd.Series([os.path.basename(path) for path in get_sorted_files(directory)])
-            file_name_col_name = normalized_cols[file_name_col_idx]
+            file_name_col_name = col_names[file_name_col_idx]
             df_unique_as_category[file_name_col_name] = parse_unique_as_category(file_name_data)
             df_unique_as_real[file_name_col_name] = parse_unique_as_real(file_name_data)
             df_unique_as_int[file_name_col_name] = parse_unique_as_int(file_name_data)
-            df_unique_as_int_cat[file_name_col_name] = parse_unique_as_int_cat(file_name)
-        unique_rows_as_category = transform_df_to_rows(normalized_cols, df_unique_as_category, 10)
-        unique_rows_as_real = transform_df_to_rows(normalized_cols, df_unique_as_real, 10)
-        unique_rows_as_int = transform_df_to_rows(normalized_cols, df_unique_as_int, 10)
-        unique_rows_as_int_cat = transform_df_to_rows(normalized_cols, df_unique_as_int_cat, 10)
+            df_unique_as_int_cat[file_name_col_name] = parse_unique_as_int_cat(file_name_data)
+        unique_rows_as_category = transform_df_to_rows(col_names, df_unique_as_category, 10)
+        unique_rows_as_real = transform_df_to_rows(col_names, df_unique_as_real, 10)
+        unique_rows_as_int = transform_df_to_rows(col_names, df_unique_as_int, 10)
+        unique_rows_as_int_cat = transform_df_to_rows(col_names, df_unique_as_int_cat, 10)
     is_rdb = not is_csv_or_v2
     return (
         cols_with_types,
@@ -381,7 +395,7 @@ def get_sample_from_preview_data(preview_data, columns):
 
 def get_latest_record_from_preview_file(fp, proc_id, limit=10):
     data = json.load(fp)
-    proc_cols = get_process_columns(proc_id, show_graph=False)
+    proc_col = get_process_columns(proc_id, show_graph=False)
     dict_data = json.loads(data)
     cols_org = dict_data.get('cols', [])
     rows_org = dict_data.get('rows', [])
@@ -402,7 +416,7 @@ def get_latest_record_from_preview_file(fp, proc_id, limit=10):
     )
     new_cols_name = list(set(org_headers) - set(column_name))
     if new_cols_name:
-        col_add = next((col for col in reversed(proc_cols) if col.get('column_name') in new_cols_name), None)
+        col_add = next((col for col in reversed(proc_col) if col.get('column_name') in new_cols_name), None)
         dict_data['cols'].append(col_add)
     dict_data['rows'] = transform_df_to_rows(org_headers, df_data_details, limit)
     return dict_data
@@ -433,24 +447,22 @@ def get_info_from_db(
     sql_limit: int = 2000,
     master_type: MasterDBType = None,
 ) -> tuple[list[str], pd.DataFrame, dict[str, str]]:
-    if data_source.type == DBType.SOFTWARE_WORKSHOP.name:
+    if data_source.type in [DBType.POSTGRES_SOFTWARE_WORKSHOP.name, DBType.SNOWFLAKE_SOFTWARE_WORKSHOP.name]:
         return get_info_from_db_software_workshop(
             data_source.id,
-            quality_measurements_table.name,
             process_factid,
             master_type=master_type,
         )
-    return get_info_from_db_normal(data_source.id, table_name, sql_limit)
+    return get_info_from_db_normal(data_source, table_name, sql_limit)
 
 
 @CustomCache.memoize(duration=300)
 def get_info_from_db_normal(
-    data_source_id,
+    data_source,
     table_name,
     sql_limit: int = 2000,
 ) -> tuple[list[str], pd.DataFrame, dict[str, str]]:
-    data_source = CfgDataSource.query.get(data_source_id)
-    with DbProxy(data_source) as db_instance:
+    with ReadOnlyDbProxy(data_source) as db_instance:
         if not db_instance or not table_name:
             return [], pd.DataFrame(), {}
 
@@ -469,83 +481,59 @@ def get_info_from_db_normal(
 
 
 @log_execution_time()
-@CustomCache.memoize(duration=300)
+# @CustomCache.memoize(duration=300)
 def get_info_from_db_software_workshop(
     data_source_id: int,
-    table_name: str,
     child_equip_id: str,
     sql_limit: int = 2000,
     master_type: MasterDBType = MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT,
 ) -> tuple[list[str], pd.DataFrame, dict[str, str]]:
-    data_source = CfgDataSource.query.get(data_source_id)
-    with DbProxy(data_source) as db_instance:
-        if not db_instance or not table_name or not child_equip_id:
+    data_source: CfgDataSource = CfgDataSource.query.get(data_source_id)
+    software_workshop_def = data_source.software_workshop_def()
+
+    with ReadOnlyDbProxy(data_source) as db_instance:
+        if not db_instance or not child_equip_id:
             return [], pd.DataFrame(), {}
-        stmt = get_transaction_data_stmt(
+        sql = software_workshop_def.get_transaction_data_query(
             child_equip_id,
             limit=sql_limit,
             master_type=master_type,
         )
-        sql, params = db_instance.gen_sql_and_params(stmt)
-        cols, rows = db_instance.run_sql(sql, row_is_dict=False, params=params)
+        cols, rows = db_instance.run_sql(sql, row_is_dict=False)
 
     df = pd.DataFrame(rows, columns=cols)
-    if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
-        return get_measurement_info_from_db_software_workshop(data_source.id, child_equip_id, df)
-    elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
-        return get_history_info_from_db_software_workshop(data_source.id, child_equip_id, df)
-    else:
-        return cols, df, {}
+    if not df.empty:
+        if software_workshop_def.snowflake:
+            if master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
+                pipeline = software_workshop_snowflake_measurement_transform_pipeline(
+                    data_source_id=data_source_id,
+                    process_factid=child_equip_id,
+                    add_missing_columns=SOFTWARE_WORKSHOP_SHOW_MISSING_COLUMNS_ON_PREVIEW,
+                )
+            elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
+                pipeline = software_workshop_snowflake_history_transform_pipeline(
+                    data_source_id=data_source_id, process_factid=child_equip_id
+                )
+            else:
+                raise NotImplementedError(f'Cannot handle master type {master_type} for snowflake data source')
+        elif master_type == MasterDBType.SOFTWARE_WORKSHOP_MEASUREMENT:
+            pipeline = software_workshop_postgres_measurement_transform_pipeline(
+                data_source_id=data_source_id,
+                process_factid=child_equip_id,
+                add_missing_columns=SOFTWARE_WORKSHOP_SHOW_MISSING_COLUMNS_ON_PREVIEW,
+            )
+        elif master_type == MasterDBType.SOFTWARE_WORKSHOP_HISTORY:
+            pipeline = software_workshop_postgres_history_transform_pipeline()
+        else:
+            raise NotImplementedError(f'Cannot handle master type {master_type} for postgres data source')
 
+        transformed_data = pipeline.run(TransformData(df=df))
+        transform_cols = transformed_data.df.columns.to_list()
+        transform_rows = transformed_data.df.to_numpy().tolist()
+        df_rows = normalize_big_rows(transform_rows, transform_cols, strip_quote=False)
+        return transform_cols, df_rows, transformed_data.name_unit_mapping
 
-def get_measurement_info_from_db_software_workshop(
-    data_source_id: int,
-    child_equip_id: str,
-    df: pd.DataFrame,
-) -> tuple[list[str], pd.DataFrame, dict[str, str]]:
-    code_col = measurements_table.c.code.name
-    unit_col = measurements_table.c.unit.name
-
-    df[unit_col] = df[unit_col].str.strip()  # Remove space characters in unit value
-
-    dict_code_with_unit = (
-        df.dropna(subset=[unit_col])  # do not get unit column with NA
-        .drop_duplicates(subset=[code_col])[[code_col, unit_col]]  # only get unique code column
-        .set_index(code_col)[unit_col]  # convert to dictionary
-        .to_dict()
-    )
-    dict_code_with_name = get_code_name_mapping(data_source_id, child_equip_id)
-    dict_code_with_name = add_suffix_for_same_column_name(dict_code_with_name)
-    dict_column_name_with_unit = {dict_code_with_name[code]: unit for code, unit in dict_code_with_unit.items()}
-
-    df = transform_df_for_software_workshop(df, data_source_id, child_equip_id)
-    transform_cols = df.columns.to_list()
-    transform_rows = df.to_numpy().tolist()
-
-    df_rows = normalize_big_rows(transform_rows, transform_cols, strip_quote=False)
-
-    return transform_cols, df_rows, dict_column_name_with_unit
-
-
-def get_history_info_from_db_software_workshop(
-    data_source_id: int,
-    child_equip_id: str,
-    df: pd.DataFrame,
-) -> tuple[list[str], pd.DataFrame, dict[str, str]]:
-    dict_column_name_with_unit = {}
-
-    df = transform_df_for_software_workshop(
-        df,
-        data_source_id,
-        child_equip_id,
-        master_type=MasterDBType.SOFTWARE_WORKSHOP_HISTORY,
-    )
-    transform_cols = df.columns.to_list()
-    transform_rows = df.to_numpy().tolist()
-
-    df_rows = normalize_big_rows(transform_rows, transform_cols, strip_quote=False)
-
-    return transform_cols, df_rows, dict_column_name_with_unit
+    return cols, df, {}
 
 
 @log_execution_time()
@@ -556,7 +544,7 @@ def get_last_distinct_sensor_values(cfg_col_id):
         return []
 
     col_name = cfg_col.bridge_column_name
-    with DbProxy(gen_data_source_of_universal_db(cfg_col.process_id), True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(cfg_col.process_id)) as db_instance:
         unique_sensor_vals = trans_data.select_distinct_data(db_instance, col_name, limit=1000)
 
     return unique_sensor_vals
@@ -568,11 +556,9 @@ def save_master_vis_config(proc_id, cfg_jsons) -> CfgProcess | None:
     with make_session() as meta_session:
         proc: CfgProcess = meta_session.query(CfgProcess).get(proc_id or -1)
         if proc:
-            cfg_vis_data = []
+            proc.visualizations = []
             for cfg_json in cfg_jsons:
-                cfg_vis_data.append(vis_schema.load(cfg_json))
-
-            proc.visualizations = cfg_vis_data
+                proc.visualizations.append(meta_session.merge(vis_schema.load(cfg_json)))
             proc = meta_session.merge(proc)
 
             return proc
@@ -863,7 +849,7 @@ def preview_csv_data(
                 org_headers,
                 data_types,
                 dupl_cols,
-                _,
+                is_gen_cols,
             ) = add_generated_datetime_column(
                 current_process_id,
                 df_data_details,
@@ -871,6 +857,7 @@ def preview_csv_data(
                 header_names,
                 dupl_cols,
                 data_types,
+                is_gen_cols,
             )
 
         # add file name
@@ -1225,6 +1212,7 @@ def gen_cols_with_types(
     dummy_datetime_idx: int = None,
     file_name_idx: int = None,
     is_gen_cols=[],
+    master_type: Optional[MasterDBType] = None,
 ):
     cols_with_types = []
     ja_locale = False
@@ -1269,16 +1257,21 @@ def gen_cols_with_types(
         units.append(unit)
 
     extracted_col_names_with_suffix, _ = gen_colsname_for_duplicated(extracted_col_names)
+    potential_id_cols = []
+    column_names_with_suffix, _ = gen_colsname_for_duplicated(cols)
 
-    idx = 0
-    for (
+    is_software_workshop = master_type is not None and MasterDBType.is_software_workshop(master_type.name)
+    for idx, (
         col_name,
         col_raw_name,
         column_name_extracted,
         unit,
         data_type,
         same_value,
-    ) in zip(cols, column_raw_name, extracted_col_names_with_suffix, units, data_types, same_values):
+    ) in enumerate(
+        zip(column_names_with_suffix, column_raw_name, extracted_col_names_with_suffix, units, data_types, same_values)
+    ):
+        extended_cfg = {}
         is_date = False if has_is_get_date_col else DataType(data_type) is DataType.DATETIME
         is_serial_no = (
             DataType(data_type) in [DataType.TEXT, DataType.INTEGER]
@@ -1295,6 +1288,27 @@ def gen_cols_with_types(
                 is_main_serial_no = True
                 is_serial_no = False
                 has_is_serial_no_col = True
+        # Collect columns with 'id' in name for potential main serial
+        elif re.search(r'.*(?:[iIｉＩ][dDｄＤ]).*', col_name, re.IGNORECASE) is not None and DataType(data_type) in [
+            DataType.INTEGER,
+            DataType.TEXT,
+        ]:
+            potential_id_cols.append(idx)
+
+        # set Datetime:key & main::Datetime for SOFTWARE_WORKSHOP
+        if is_software_workshop:
+            if col_name.lower() == POSTGRES_SOFTWARE_WORKSHOP_DEF.event_time:
+                is_date = True
+                extended_cfg[ProcessColumnConst.COLUMN_TYPE.value] = DataColumnType.DATETIME.value
+                extended_cfg[ProcessColumnConst.DATA_TYPE.value] = DataType.DATETIME.name
+            elif col_name.lower() == POSTGRES_SOFTWARE_WORKSHOP_DEF.created_at:
+                is_date = False
+                extended_cfg[ProcessColumnConst.IS_AUTO_INCREMENT.value] = True
+                extended_cfg[ProcessColumnConst.COLUMN_TYPE.value] = DataColumnType.DATETIME_KEY.value
+                extended_cfg[ProcessColumnConst.DATA_TYPE.value] = DataType.DATETIME.name
+            else:
+                is_date = False
+                has_is_get_date_col = False
 
         # add to output
         if col_name:
@@ -1312,7 +1326,7 @@ def gen_cols_with_types(
                 name_local = name_en
 
             romaji = name_en
-            unit = dict_column_name_and_unit.get(col_raw_name, unit)
+            col_unit = dict_column_name_and_unit.get(col_raw_name, unit)
             cols_with_types.append(
                 {
                     'column_name': col_name,
@@ -1328,19 +1342,23 @@ def gen_cols_with_types(
                     'name_jp': name_jp,
                     'name_local': name_local,
                     'column_raw_name': col_raw_name,
-                    'unit': unit,
+                    'unit': col_unit,
                     'is_checked': not same_value.get('is_null'),
                     'is_show': True,
+                    **extended_cfg,
                 },
             )
 
-        idx += 1
+    # If no main serial number was assigned, check for ID columns
+    if not has_is_serial_no_col and potential_id_cols:
+        # Assign the first ID column as main serial
+        cols_with_types[potential_id_cols[0]]['is_main_serial_no'] = True
 
     return cols_with_types
 
 
 @log_execution_time()
-def convert_utc_df(df_rows, cols, data_types, data_source, table_name):
+def convert_utc_df(df_rows, cols, data_types, data_source):
     for col_name, data_type in zip(cols, data_types):
         is_date = DataType(data_type) is DataType.DATETIME
         if not is_date:
@@ -1365,11 +1383,7 @@ def convert_utc_df(df_rows, cols, data_types, data_source, table_name):
 
 @log_execution_time()
 def transform_df_to_rows(cols, df_rows, limit):
-    df_rows.columns = normalize_list(df_rows.columns)
-    normalized_cols = normalize_list(cols)
-    return [
-        dict(zip(normalized_cols, vals)) for vals in df_rows[0:limit][normalized_cols].to_records(index=False).tolist()
-    ]
+    return [dict(zip(cols, vals)) for vals in df_rows[0:limit][cols].to_records(index=False).tolist()]
 
 
 @log_execution_time()
@@ -1572,6 +1586,7 @@ def add_generated_datetime_column(
     header_names,
     dupl_cols,
     data_types,
+    is_gen_cols=None,
 ):
     # get datetime column
     main_datetime_col = CfgProcessColumn.get_col_main_datetime(current_process_id)
@@ -1585,7 +1600,7 @@ def add_generated_datetime_column(
             # TODO: add sample data for datetime column
             data = [None] * len(df_data_details)
             data_type = DataType.DATETIME.value
-            header_names, df_data_details, org_headers, data_types, dupl_cols, _ = add_new_column_with_data(
+            header_names, df_data_details, org_headers, data_types, dupl_cols, is_gen_cols = add_new_column_with_data(
                 header_names,
                 df_data_details,
                 org_headers,
@@ -1594,6 +1609,7 @@ def add_generated_datetime_column(
                 data,
                 data_type,
                 column_name,
+                is_gen_cols,
             )
 
             # add sample data for datetime column
@@ -1614,7 +1630,7 @@ def add_generated_datetime_column(
                     + df_data_details[column_main_time_name].astype(str)
                 )
 
-    return header_names, df_data_details, org_headers, data_types, dupl_cols, None
+    return header_names, df_data_details, org_headers, data_types, dupl_cols, is_gen_cols
 
 
 @log_execution_time()
@@ -1623,12 +1639,14 @@ def save_preview_data_file(
     data: dict,
     table_name=None,
     process_factid=None,
+    master_type=None,
     etl_func=None,
 ):
     sample_data_file = gen_latest_record_result_file_path(
         data_source_id,
         table_name=table_name,
         process_factid=process_factid,
+        master_type=master_type,
         etl_func=etl_func,
     )
     make_dir_from_file_path(sample_data_file)
@@ -1636,7 +1654,7 @@ def save_preview_data_file(
         json.dump(data, outfile)
 
 
-def get_preview_data_files(data_source_id, table_name=None, process_factid=None, etl_func=None):
+def get_preview_data_files(data_source_id, table_name=None, process_factid=None, master_type=None, etl_func=None):
     folder_path = get_preview_data_file_folder(data_source_id)
     if check_exist(folder_path):
         _files = get_files(folder_path, extension=['csv', 'tsv', 'json'])
@@ -1644,6 +1662,7 @@ def get_preview_data_files(data_source_id, table_name=None, process_factid=None,
             data_source_id,
             table_name=table_name,
             process_factid=process_factid,
+            master_type=master_type,
             etl_func=etl_func,
         )
         if file_name in _files:
@@ -1652,19 +1671,23 @@ def get_preview_data_files(data_source_id, table_name=None, process_factid=None,
     return None
 
 
-def gen_latest_record_result_file_path(data_source_id, table_name=None, process_factid=None, etl_func=None):
+def gen_latest_record_result_file_path(
+    data_source_id,
+    table_name=None,
+    process_factid=None,
+    master_type=None,
+    etl_func=None,
+):
     sample_data_path = get_preview_data_file_folder(data_source_id)
-    if table_name:
-        name = f'{data_source_id}_{table_name}'
-        file_name = f'{name}.json' if not etl_func else f'{name}_{etl_func}.json'
-    elif process_factid:
-        file_name = (
-            f'{data_source_id}_{process_factid}.json'
-            if not etl_func
-            else f'{data_source_id}_{process_factid}_{etl_func}.json'
-        )
-    else:
-        file_name = f'{data_source_id}.json'
+    file_partials = [
+        str(data_source_id),
+        table_name,
+        process_factid,
+        str(master_type),
+        etl_func,
+    ]
+    file_name = '_'.join([p for p in file_partials if p])
+    file_name = f'{file_name}.json'
     sample_data_file = os.path.join(sample_data_path, file_name)
     return sample_data_file
 

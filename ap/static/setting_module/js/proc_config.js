@@ -265,15 +265,16 @@ const getProcInfo = async (procId) => {
                 propGroupTableDropdown(true);
             }
             if (res.tables.tables) {
-                const isSoftwareWorkshop = res.tables.ds_type === DB_CONFIGS.SOFTWARE_WORKSHOP.configs.type;
+                const isSoftwareWorkshop = res.tables.ds_type === DB_CONFIGS.POSTGRES_SOFTWARE_WORKSHOP.configs.type;
+                const isSWSnowflake = res.tables.ds_type === DB_CONFIGS.SNOWFLAKE_SOFTWARE_WORKSHOP.configs.type;
                 const processFactIds = res.tables.process_factids;
                 const masterTypes = res.tables.master_types;
                 res.tables.tables.forEach(function (tbl, index) {
                     const options = {
                         value: tbl,
                         text: tbl,
-                        process_fact_id: isSoftwareWorkshop ? processFactIds[index] : '',
-                        master_type: isSoftwareWorkshop ? masterTypes[index] : '',
+                        process_fact_id: isSoftwareWorkshop || isSWSnowflake ? processFactIds[index] : '',
+                        master_type: isSoftwareWorkshop || isSWSnowflake ? masterTypes[index] : '',
                     };
                     if (res.data.table_name === tbl) {
                         options.selected = 'selected';
@@ -512,6 +513,8 @@ const addProcToTable = (
     nameLocal = '',
     procShownName = '',
     dbsId = null,
+    tableName = '',
+    dbsName = '',
 ) => {
     // function to create proc_id
 
@@ -531,21 +534,33 @@ const addProcToTable = (
     const dummyRowID = new Date().getTime().toString(36);
     const rowNumber = $(`${procElements.tblProcConfigID} tbody tr`).length;
 
+    // for SW processes
+    const tableEles = `<option value="${tableName}">${tableName || '---'}</option>`;
+
+    // if creating a process row from AddNew (Plus) Button
+    let dsSelector = `<select class="form-control" name="databaseName" ${dbsId ? 'disabled' : ''}
+                             onChange="changeDataSource(this);"
+                             onfocusin="focusInSelectDataSource(this)">${DSSelectionWithDefaultVal}</select>`;
+    if (dbsName) {
+        // if creating a process row then disable fields
+        dsSelector = `<input class="form-control" name="databaseName" ${dbsId ? 'disabled' : ''}
+                            value="${dbsName}"/>`;
+    }
+
     const newRecord = `
     <tr name="procInfo" ${procId ? `data-proc-id=${procId} id=proc_${procId}` : ''} ${dbsId ? `data-ds-id=${dbsId}` : ''} data-rowid="${dummyRowID}" data-test-id="${procShownName || ''}">
         <td class="col-number">${rowNumber + 1}</td>
         <td>
             <input data-name-en="${procName}" data-name-jp="${nameJP || ''}" data-name-local="${nameLocal || ''}" name="processName" class="form-control" type="text"
                 placeholder="${procConfigTextByLang.procName}" value="${procShownName || ''}" ${procName ? 'disabled' : ''} ${dragDropRowInTable.DATA_ORDER_ATTR}
-                onfocusout="hideDataSourceRegistered(this)">
+                onfocusout="hideDataSourceRegistered(this)"/>
         </td>
         <td>
-            <select class="form-control" name="databaseName" ${dbsId ? 'disabled' : ''}
-                onchange="changeDataSource(this);" onfocusin="focusInSelectDataSource(this)">${DSSelectionWithDefaultVal}</select>
+            ${dsSelector}
         </td>
         <td>
             <select class="form-control" name="tableName" ${dbsId ? 'disabled' : ''}>
-                <option value="">---</option>
+                ${tableEles}
             </select>
         </td>
         <td class="text-center">
@@ -566,7 +581,10 @@ const addProcToTable = (
         </td>
     </tr>`;
 
-    $(procElements.tableProcList).append(newRecord);
+    const $procTable = $(procElements.tableProcList);
+    if (!$procTable.find(`#proc_${procId}`).length) {
+        $procTable.append(newRecord);
+    }
     if (procName && dbsId) {
         dragDropRowInTable.setItemLocalStorage($(procElements.tableProcList)[0]); // set proc table order
     }

@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class MySQL:
-    def __init__(self, host, dbname, username, password):
+    def __init__(self, host, dbname, username, password, port=3306, read_only=False):
         self.host = host
-        self.port = 3306
+        self.port = port
         self.dbname = dbname
         # postgresqlと違い、mysqlにはdbとschemaは同義
         # postgresqlはdbの下にschemaという概念がある。
@@ -24,6 +24,7 @@ class MySQL:
         self.password = password
         self.is_connected = False
         self.connection = None
+        self.read_only = read_only
 
     def dump(self):
         logger.info(

@@ -4,12 +4,16 @@ import functools
 import logging
 import os.path
 from datetime import datetime
+from re import findall
 from typing import Any, Literal, Optional
 
 import numpy as np
 import pandas as pd
-from dateutil import tz
+import pydantic
+from dateutil import tz, zoneinfo
 from pandas import DataFrame, Series
+from pytz import timezone
+from pytz.exceptions import NonExistentTimeError
 
 from ap.api.common.services.utils import gen_sql_and_params
 from ap.common.common_utils import (
@@ -38,11 +42,11 @@ from ap.common.constants import (
     CsvDelimiter,
     DataColumnType,
     DataType,
-    DBType,
     EFAColumn,
     JobStatus,
     JobType,
 )
+from ap.common.cryptography_utils import decrypt_pwd
 from ap.common.disk_usage import get_ip_address
 from ap.common.logger import log_execution_time
 from ap.common.multiprocess_sharing import EventExpireCache, EventQueue
@@ -56,6 +60,7 @@ from ap.common.path_utils import (
     split_path_to_list,
 )
 from ap.common.pydn.dblib.db_proxy import DbProxy, gen_data_source_of_universal_db
+from ap.common.pydn.dblib.db_proxy_read_only import ReadOnlyDbProxy
 from ap.common.services import csv_header_wrapr as chw
 from ap.common.services.csv_content import read_data
 from ap.common.services.jp_to_romaji_utils import to_romaji
@@ -148,7 +153,6 @@ def import_data(df, target_cfg_process: CfgProcess, get_date_col, job_info=None,
     with DbProxy(
         gen_data_source_of_universal_db(target_cfg_process.id),
         True,
-        immediate_isolation_level=True,
     ) as db_instance:
         # add new column name if not exits
         TransactionData.add_columns(db_instance, table_name, dic_col_with_type)
@@ -189,29 +193,78 @@ def update_or_create_constant_by_type(const_type, value=0):
 # -------------------------- Factory past 1 days data import -----------------------------
 
 
+# use pydantic for autocompletion
+class DbConnectionParam(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    id: Optional[int] = None
+    db_type: str
+    dbname: str
+    host: Optional[str] = None  # can be none if sqlite3
+    port: Optional[int] = None  # can be none if sqlite3
+    dbschema: Optional[str] = pydantic.Field(alias='schema', default=None)  # can be none if oracle?
+    username: Optional[str] = None  # can be none if sqlite3
+    password: Optional[str] = None  # can be none if sqlite3 / snowflake
+
+    # snowflake
+    snowflake_authentication_type: Optional[str] = None
+    snowflake_access_token: Optional[str] = None
+    snowflake_private_key_file: Optional[str] = None
+    snowflake_private_key_file_pwd: Optional[str] = None
+
+    @pydantic.field_validator('port', mode='before')
+    @classmethod
+    def parse_int_or_none(cls, port: str):
+        return parse_int_value(port)
+
+    @pydantic.field_validator('db_type', mode='after')
+    @classmethod
+    def db_type_uppercase(cls, db_type: str):
+        # TODO: frontend sending 'snowflake' here, but DbType.SNOWFLAKE.name is uppercase
+        return db_type.upper()
+
+    @pydantic.model_validator(mode='after')
+    def decrypt_password(self):
+        if not self.password:
+            self.password = None
+        if not self.snowflake_access_token:
+            self.snowflake_access_token = None
+        if not self.snowflake_private_key_file_pwd:
+            self.snowflake_private_key_file_pwd = None
+
+        if self.id is not None:
+            db: CfgDataSourceDB = CfgDataSourceDB.get_by_id(self.id)
+            # new connection, use the password that users passed on (even if it is None)
+            if db is None:
+                return self
+
+            # otherwise, use existing password in database if user doesn't specified
+
+            if self.password is None and db.password:
+                self.password = decrypt_pwd(db.password)
+
+            if self.snowflake_access_token is None and db.snowflake_access_token:
+                self.snowflake_access_token = decrypt_pwd(db.snowflake_access_token)
+
+            if self.snowflake_private_key_file_pwd is None and db.snowflake_private_key_file_pwd:
+                self.snowflake_private_key_file_pwd = decrypt_pwd(db.snowflake_private_key_file_pwd)
+
+        return self
+
+    def data_source_no_id(self) -> CfgDataSource:
+        db_detail = CfgDataSourceDB(**self.model_dump(exclude={'db_type', 'id'}, by_alias=True))
+        db_source = CfgDataSource()
+        db_source.db_detail = db_detail
+        db_source.type = self.db_type
+        return db_source
+
+
 @log_execution_time()
-def check_db_con(db_type, host, port, dbname, schema, username, password):
-    parsed_int_port = parse_int_value(port)
-    if parsed_int_port is None and db_type.lower() != DBType.SQLITE.name.lower():
-        return False
-
-    # 　オブジェクトを初期化する
-    db_source_detail = CfgDataSourceDB()
-    db_source_detail.host = host
-    db_source_detail.port = parsed_int_port
-    db_source_detail.dbname = dbname
-    db_source_detail.schema = schema
-    db_source_detail.username = username
-    db_source_detail.password = password
-
-    db_source = CfgDataSource()
-    db_source.db_detail = db_source_detail
-    db_source.type = db_type
-
+def check_db_con(param: DbConnectionParam):
+    db_source = param.data_source_no_id()
     # if we cannot connect, this will raise Exception
     # コネクションをチェックする
-    DbProxy.check_db_connection(db_source, force=True)
-
+    ReadOnlyDbProxy.check_db_connection(db_source, force=True)
     return True
 
 
@@ -601,7 +654,8 @@ def csv_data_with_headers(csv_file_name, data_src):
     if not efa_header_exists or not read_directly_ok:
         csv_inst, _ = chw.get_file_info_py(csv_file_name)
         if isinstance(csv_inst, Exception):
-            return csv_inst
+            logger.exception(csv_inst)
+            return [], []
 
         if csv_inst is None:
             return [], []
@@ -725,10 +779,11 @@ def gen_import_job_info(job_info, save_res, start_time=None, end_time=None, impo
         else:
             msg = err_msgs
 
-        if job_info.err_msg and msg:
-            job_info.err_msg += msg
-        else:
-            job_info.err_msg = msg
+        if msg:
+            if job_info.err_msg:
+                job_info.err_msg += msg
+            else:
+                job_info.err_msg = msg
 
     return job_info
 
@@ -1010,9 +1065,19 @@ def convert_df_col_to_utc(df, get_date_col, is_timezone_inside, db_time_zone, ut
         return local_dt
 
     if not local_dt.dt.tz:
-        # utc_time_offset = 0: current UTC
-        # cast to local before convert to utc
-        local_dt = local_dt.dt.tz_localize(tz=db_time_zone, ambiguous='infer')
+        try:
+            # utc_time_offset = 0: current UTC
+            # cast to local before convert to utc
+            local_dt = local_dt.dt.tz_localize(tz=db_time_zone, ambiguous='infer')
+        except NonExistentTimeError as e:
+            if isinstance(db_time_zone, zoneinfo.tzfile):
+                zone = findall(r"^tzfile\('(.*)'\)$", str(db_time_zone))[0]
+                local_dt = local_dt.map(lambda x: timezone(zone).localize(x))
+            else:
+                raise e
+        except Exception as e:
+            raise e
+
     return local_dt.dt.tz_convert(tz.tzutc())
 
 
@@ -1135,10 +1200,7 @@ def check_timezone_changed(proc_id, yml_use_os_timezone):
     if db_use_os_tz is None:
         return False
 
-    if db_use_os_tz == yml_use_os_timezone:
-        return False
-
-    return True
+    return db_use_os_tz != yml_use_os_timezone
 
 
 @log_execution_time()
@@ -1220,7 +1282,7 @@ def get_record_from_obj(columns, object_data):
 
 @log_execution_time()
 def insert_data_to_db(cycle_vals, sql_insert_cycle):
-    with DbProxy(gen_data_source_of_universal_db(), True, immediate_isolation_level=True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(), True) as db_instance:
         # insert cycle
         insert_data(db_instance, sql_insert_cycle, cycle_vals)
 
@@ -1365,13 +1427,13 @@ def save_import_history(proc_id, job_info):
         sql_params.append(params)
 
     if sql is not None:
-        with DbProxy(gen_data_source_of_universal_db(proc_id), True, immediate_isolation_level=True) as db_instance:
+        with DbProxy(gen_data_source_of_universal_db(proc_id), True) as db_instance:
             insert_data(db_instance, sql, sql_params)
 
 
 @log_execution_time()
 def save_failed_import_history(proc_id, job_info, error_type):
-    job_info.status = JobStatus.FAILED.name
+    job_info.status = JobStatus.FAILED
     job_info.err_msg = error_type
     # save import history before return
     # insert import history

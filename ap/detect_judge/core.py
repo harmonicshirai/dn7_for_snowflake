@@ -3,12 +3,6 @@ from typing import Union
 
 import pandas as pd
 
-JUDGE_AVAILABLE = 'judge_available'
-JUDGE_FORMULA = 'judge_formula'
-JUDGE_POSITIVE_VALUE = 'judge_positive_value'
-JUDGE_POSITIVE_DISPLAY = 'judge_positive_display'
-JUDGE_NEGATIVE_DISPLAY = 'judge_negative_display'
-
 
 @dataclass(frozen=True)
 class JudgeFormula:

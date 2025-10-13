@@ -3,9 +3,45 @@ import re
 
 import cutlet
 
-from ap.common.services.normalization import normalize_preprocessing, normalize_str
+from ap.common.constants import EMPTY_STRING
+from ap.common.services.normalization import GREEK_U_RE, normalize_preprocessing, normalize_str
 
 conv = cutlet.Cutlet()
+
+# remove space and other elements after converting to romaji
+# cutlet puts space before and after a 'word', so this must be done one more time after romaji conversion
+# some words might return ?? due to cutlet's inability to convert some kanjis
+WHITESPACE_AND_SYMBOLS_RE = re.compile(r'[\s\t\+\*…・:;!\?\$\&\"\'\`\=\@\#\\\/。、\.,~\|]')
+
+# `[\(\)\[\]<>\{\}【】]` in string in `English Name` should be replaced into `_`.
+BRACKETS_RE = re.compile(r'[\(\)\[\]<>\{\}【】]')
+
+# hyphen: remove multi
+HYPHEN_MULTI_RE = re.compile(r'-+')
+UNDERSCORE_MULTI_RE = re.compile(r'_+')
+
+# under score: remove first , last, multi
+START_HYPHEN_UNDERSCORE_RE = re.compile(r'^[_-]')
+END_HYPHEN_UNDERSCORE_RE = re.compile(r'[_-]$')
+
+# `[℃°]` in `English Name` should be replaced in to `deg`.
+DEG_RE = re.compile(r'[℃°]')
+
+# `℉` in `English Name` should be replaced in to `degF`.
+DEGF_RE = re.compile(r'℉')
+PERCENT_RE = re.compile(r'%')
+
+# `[Δ, △]` in English Name should be replaced into `d`.
+DELTA_RE = re.compile(r'[Δ△]')
+
+# `Ω` in English Name should be replaced into `ohm`.
+OHM_RE = re.compile(r'Ω')
+
+# replace for μµ
+UU_RE = re.compile(r'Uu|uu')
+
+# `Mm` in English Name should be replaced into `mm`.
+MM_RE = re.compile(r'Mm')
 
 
 def to_romaji(input_str, convert_irregular_chars=True):
@@ -22,10 +58,7 @@ def to_romaji(input_str, convert_irregular_chars=True):
     # normalized_input = p.do(normalized_input)
     normalized_input = conv.romaji(normalized_input, title=False) if conv else normalized_input
 
-    # remove space and other elements after converting to romaji
-    # cutlet puts space before and after a 'word', so this must be done one more time after romaji conversion
-    # some words might return ?? due to cutlet's inability to convert some kanjis
-    normalized_input = re.sub(r'[\s\t\+\*…・:;!\?\$\&\"\'\`\=\@\#\\\/。、\.,~\|]', '', normalized_input)
+    normalized_input = WHITESPACE_AND_SYMBOLS_RE.sub(EMPTY_STRING, normalized_input)
 
     # snake to camel
     # normalized_input = string.capwords(normalized_input)
@@ -35,39 +68,24 @@ def to_romaji(input_str, convert_irregular_chars=True):
 def replace_special_symbols(input_str):
     normalized_input = input_str
 
-    # `[μµ]` in `English Name` should be replaced in to `u`.
-    # convert u before kakasi applied to keep u instead of M
-    normalized_input = re.sub(r'[μµ]', 'u', normalized_input)
-
-    # `[\(\)\[\]<>\{\}【】]` in string in `English Name` should be replaced into `_`.
-    normalized_input = re.sub(r'[\(\)\[\]<>\{\}【】]', '_', normalized_input)
+    normalized_input = GREEK_U_RE.sub('u', normalized_input)
+    normalized_input = BRACKETS_RE.sub('_', normalized_input)
 
     # hyphen: remove multi
-    normalized_input = re.sub(r'-+', '-', normalized_input)
-    normalized_input = re.sub(r'_+', '_', normalized_input)
+    normalized_input = HYPHEN_MULTI_RE.sub('-', normalized_input)
+    normalized_input = UNDERSCORE_MULTI_RE.sub('_', normalized_input)
 
     # under score: remove first , last, multi
-    normalized_input = re.sub(r'^[_-]', '', normalized_input)
-    normalized_input = re.sub(r'[_-]$', '', normalized_input)
+    normalized_input = START_HYPHEN_UNDERSCORE_RE.sub(EMPTY_STRING, normalized_input)
+    normalized_input = END_HYPHEN_UNDERSCORE_RE.sub(EMPTY_STRING, normalized_input)
 
-    # `[℃°]` in `English Name` should be replaced in to `deg`.
-    normalized_input = re.sub(r'[℃°]', 'deg', normalized_input)
-
-    # `℉` in `English Name` should be replaced in to `degF`.
-    normalized_input = re.sub(r'℉', 'degF', normalized_input)
-    normalized_input = re.sub(r'%', 'pct', normalized_input)
-
-    # `[Δ, △]` in English Name should be replaced into `d`.
-    normalized_input = re.sub(r'[Δ△]', 'd', normalized_input)
-
-    # `Ω` in English Name should be replaced into `ohm`.
-    normalized_input = re.sub(r'Ω', 'ohm', normalized_input)
-
-    # replace for μµ
-    normalized_input = re.sub(r'Uu|uu', 'u', normalized_input)
-
-    # `Mm` in English Name should be replaced into `mm`.
-    normalized_input = re.sub(r'Mm', 'mm', normalized_input)
+    normalized_input = DEG_RE.sub('deg', normalized_input)
+    normalized_input = DEGF_RE.sub('degF', normalized_input)
+    normalized_input = PERCENT_RE.sub('pct', normalized_input)
+    normalized_input = DELTA_RE.sub('d', normalized_input)
+    normalized_input = OHM_RE.sub('ohm', normalized_input)
+    normalized_input = UU_RE.sub('u', normalized_input)
+    normalized_input = MM_RE.sub('mm', normalized_input)
 
     return normalized_input
 

@@ -44,6 +44,9 @@
                                         onclick="showZipExportModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Export
                                     </button>
@@ -52,6 +55,9 @@
                                         onclick="showZipImportModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Import
                                     </button>
@@ -67,6 +73,9 @@
                                         onclick="showResetTransactionDataModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Reset
                                     </button>
@@ -75,6 +84,9 @@
                                         onclick="openBackupAndRestoreModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Backup & Restore
                                     </button>
@@ -93,6 +105,9 @@
                                         onclick="showDeleteLogDataModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Delete
                                     </button>
@@ -108,6 +123,9 @@
                                         onclick="showDeleteDataFolderModal()"
                                         class="btn btn-primary btn-left"
                                         type="button"
+                                        {% if not is_authorized %}
+                                            disabled
+                                        {% endif %}
                                     >
                                         Delete
                                     </button>

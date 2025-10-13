@@ -254,6 +254,15 @@ const CfgProcess_CONST = {
     ],
 };
 
+const SoftwareWorkshopMasterTypes = {
+    MEASUREMENT: {
+        i18n: '#i18nMasterTypeMeasurement',
+    },
+    HISTORY: {
+        i18n: '#i18nMasterTypeHistory',
+    },
+};
+
 class CfgColumn {
     id;
     column_name;
@@ -493,6 +502,15 @@ class CfgProcess {
 
     getColumnData = (columnId) => {
         return this.dicColumnData[columnId] || [];
+    };
+
+    getJudgeData = (columnId) => {
+        return {
+            isJudge: this.dicColumns[columnId]?.is_judge || false,
+            positiveValue: this.dicColumns[columnId]?.judge_positive_value || '',
+            positiveDisplay: this.dicColumns[columnId]?.judge_positive_display || '',
+            negativeDisplay: this.dicColumns[columnId]?.judge_negative_display || '',
+        };
     };
 
     updateColDataFromUDB = async (columnId) => {

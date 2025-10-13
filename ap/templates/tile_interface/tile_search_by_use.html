@@ -9,21 +9,29 @@
 
 {% block midbody %}
     <div class="tile-head">
-        <div class="col">
-            <button class="btn btn-collapse-gray collapsed-btn" type="button" onclick="collapsingTiles(false);">
+        <div class="col d-flex">
+            <button class="btn btn-collapse-gray collapsed-btn mr-2" type="button" onclick="collapsingTiles(false);">
                 <i class="fa-solid fa-sm fa-angles-down"></i> Expand All
             </button>
-            <button class="btn btn-collapse-gray collapsed-btn" type="button" onclick="collapsingTiles();">
+            <button class="btn btn-collapse-gray collapsed-btn mr-2" type="button" onclick="collapsingTiles();">
                 <i class="fa-solid fa-sm fa-angles-up"></i> Collapse All
             </button>
+            <span class="deleteicon">
+                <input
+                    id="usage-search"
+                    class="common-search-input search-usage  form-control already-convert-hankaku"
+                    placeholder="{{ _('Search') }}..."
+                />
+                <span class="remove-search">x</span>
+            </span>
         </div>
     </div>
     <div class="tile-wrapper">
         {% for section in sections %}
-            <div class="tile-interface tile-usage active graph-navi">
+            <div class="tile-interface tile-usage active graph-navi search-target">
                 <div class="section-title">
                     <div class="row" href="#section_{{ loop.index }}" data-toggle="collapse" aria-expanded="true">
-                        <div class="col section-name">
+                        <div class="col section-name ">
                             <div class="icon-col mr-3">
                                 <a
                                     class="btn-collapse collapsed"
@@ -73,7 +81,7 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="tile-description">
+                                        <div class="tile-description search-target">
                                             {% for para in tile.description.split('\\n') %}
                                                 <p>{{ para|safe }}</p>
                                             {% endfor %}

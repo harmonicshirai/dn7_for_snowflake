@@ -15,6 +15,7 @@ from ap.common.constants import (
     ARRAY_Y,
     ELAPSED_TIME,
     JUDGE_DATA,
+    JUDGE_NEGATIVE_DISPLAY,
     RANK_COL,
     RESAMPLING_SIZE,
     SCALE_AUTO,
@@ -32,7 +33,6 @@ from ap.common.memoize import CustomCache
 from ap.common.services.request_time_out_handler import abort_process_handler
 from ap.common.services.statistics import convert_series_to_number
 from ap.common.sigificant_digit import get_fmt_from_array
-from ap.detect_judge.core import JUDGE_NEGATIVE_DISPLAY
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +248,7 @@ def get_grid_points(plotdata, bounds=None, bins=128, width=1):
 
         xmin = 0
         xmax = 0
-        if len(mind) and len(maxd):
+        if mind and maxd:
             # FIXME: this isn't correct, we cannot subtract lists
             # default width=1 -> line scope is min/max +- 10%
             xmin = mind - 0.1 * width * (maxd - mind)

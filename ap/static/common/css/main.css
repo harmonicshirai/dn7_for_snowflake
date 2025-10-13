@@ -1720,6 +1720,7 @@ input:disabled + .slider {
 
 .hist-summary {
     padding-bottom: 5px;
+    position: relative;
 }
 
 @media (min-width: 1200px) {
@@ -2759,4 +2760,22 @@ table#tblImportCondition td {
 
 .modal-msg {
     white-space: pre-line;
+}
+
+.mb-1rem {
+    margin-bottom: 1rem;
+}
+
+@keyframes custom-rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.custom-spin {
+    display: inline-block;
+    animation: custom-rotation 2s linear infinite;
 }

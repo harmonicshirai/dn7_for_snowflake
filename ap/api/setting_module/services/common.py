@@ -7,7 +7,7 @@ from dateutil import parser
 
 from ap.common.common_utils import parse_int_value
 from ap.common.constants import DATETIME_PICKER, DATETIME_RANGE_PICKER, EN_DASH
-from ap.setting_module.models import CfgUserSetting, insert_or_update_config, make_session
+from ap.setting_module.models import CfgUserSetting, make_session
 from ap.setting_module.schemas import CfgUserSettingSchema
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def is_local_client(req):
 def save_user_settings(request_params, exclude_columns=None):
     with make_session() as meta_session:
         cfg_user_setting = parse_user_setting(request_params)
-        new_setting = insert_or_update_config(meta_session, cfg_user_setting, exclude_columns=exclude_columns)
+        new_setting = meta_session.merge(cfg_user_setting)
         meta_session.commit()
     return new_setting
 
@@ -111,10 +111,10 @@ def convert_datetime_from_local_to_utc(settings):
     settings = json.loads(settings)
     timezone = settings.get('timezone', '')
     if not timezone:
-        return settings
+        return json.dumps(settings)
     form_settings: list[Any] = settings[next(iter(settings))]
     for form_setting in form_settings:
-        key_name = form_setting['name'] if 'name' in form_setting else ''
+        key_name = form_setting.get('name', '')
         if key_name and key_name in [DATETIME_RANGE_PICKER, DATETIME_PICKER]:
             time_val = form_setting['value']
             form_setting['value'] = convert_local_to_utc_with_en_dash_full_size(time_val, timezone)

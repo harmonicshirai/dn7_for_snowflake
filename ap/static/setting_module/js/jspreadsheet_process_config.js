@@ -28,11 +28,11 @@ class SpreadSheetProcessConfig {
 
     /**
      * @param {string} tableId
-     * @param {Object.<string, any>[]}data
+     * @param {Object.<string, any>[]} data
      * @param {boolean} registerByFile - is this register by file?
      * @returns {SpreadSheetProcessConfig}
      */
-    static create(tableId, data, { registerByFile = false, sampleDataDisplayMode = 'records' } = {}) {
+    static async create(tableId, data, registerByFile = false) {
         const options = SpreadSheetProcessConfig.options({ registerByFile });
         const table = JspreadSheetTable.createTable(
             tableId,
@@ -46,14 +46,39 @@ class SpreadSheetProcessConfig {
         const spreadsheet = spreadsheetProcConfig(tableId);
 
         // parse sample data by datatype
-        const shownDataTypes = spreadsheet.table.getColumnDataByHeaderName(PROCESS_COLUMNS.shown_data_type);
-        shownDataTypes.forEach((shownDataType, index) => {
-            spreadsheet.changeShownDataType(index, shownDataType, SAMPLE_DATA_DISPLAY_MODES.RECORDS, {
-                isFirstLoad: true,
-            });
-        });
+        await SpreadSheetProcessConfig.updateSampleDataByDisplayMode(spreadsheet, SAMPLE_DATA_DISPLAY_MODES.RECORDS);
 
         return spreadsheet;
+    }
+
+    /**
+     * Init loading animation for Jspreadsheet table
+     * @param {string} tableId
+     * @return {Element & {show: () => void, hide: () => void}}
+     */
+    static initLoadingTable(tableId) {
+        const tableEl = document.querySelector(`#${tableId}`);
+        let loadingEl = document.querySelector(`#${tableId} .loading`);
+        if (loadingEl == null) {
+            loadingEl = document.createElement('div');
+            loadingEl.id = `configProcessLoading-${tableId}`;
+            loadingEl.classList.add('loading');
+            tableEl.appendChild(loadingEl);
+        }
+
+        // Show loading animation when table data is being loaded
+        loadingEl.show = function showLoadingAnimation() {
+            loadingEl.style.display = 'block';
+            tableEl.style.pointerEvents = 'none';
+        };
+
+        // Hide loading animation when table data is loaded and rendered
+        loadingEl.hide = function hideLoadingAnimation() {
+            loadingEl.style.display = 'none';
+            tableEl.style.pointerEvents = 'auto';
+        };
+
+        return loadingEl;
     }
 
     /**
@@ -371,7 +396,7 @@ class SpreadSheetProcessConfig {
         }
 
         // The DL settings have changed (the part before “=” in the conversion formula has changed). --> Only accept changing display value of formula
-        if (isRegisteredData) {
+        if (isRegisteredData && !isInitialize) {
             const positiveValue = newValue.split('|')[0];
             if (oldValue && oldValue.split('|')[0] !== positiveValue) {
                 this.showErrorMsg(invalidMsgOfImportedJudge);
@@ -668,11 +693,28 @@ class SpreadSheetProcessConfig {
         });
     }
 
-    updateSampleDataByDisplayMode(spreadsheet, displayMode) {
+    static async updateSampleDataByDisplayMode(spreadsheet, displayMode) {
+        const loadingEl = this.initLoadingTable(spreadsheet.table.tableId);
+        loadingEl.show();
+
         const shownDataTypes = spreadsheet.table.getColumnDataByHeaderName(PROCESS_COLUMNS.shown_data_type);
-        shownDataTypes.forEach((shownDataType, index) => {
-            spreadsheet.changeShownDataType(index, shownDataType, displayMode, { isFirstLoad: true });
-        });
+        await Promise.all(
+            // Must separate to another worker because it takes a long time and blocks the UI.
+            shownDataTypes.map((shownDataType, index) =>
+                new Promise((resolve, reject) =>
+                    setTimeout(() => {
+                        try {
+                            spreadsheet.changeShownDataType(index, shownDataType, displayMode, { isFirstLoad: true });
+                            resolve();
+                        } catch (e) {
+                            reject(e);
+                        }
+                    }, 0),
+                ).catch((e) => {
+                    console.error(e);
+                }),
+            ),
+        ).then(() => loadingEl.hide());
     }
 
     /**
@@ -699,6 +741,7 @@ class SpreadSheetProcessConfig {
         columnClasses[PROCESS_COLUMNS.name_jp] = ['column-japanese-name'];
         columnClasses[PROCESS_COLUMNS.name_local] = ['column-local-name'];
         columnClasses[PROCESS_COLUMNS.unit] = ['column-unit'];
+        columnClasses[PROCESS_COLUMNS.judge_formula] = ['column-judge-formula'];
         columnClasses[PROCESS_COLUMNS.raw_data_type] = ['column-raw-data-type'];
 
         // Set classes into table body cells
@@ -1237,6 +1280,11 @@ class SpreadSheetProcessConfig {
 
                 spreadsheet.reIndexForSpecialRow(spreadsheet);
             },
+
+            onselection: (instance, x, y) => {
+                const spreadsheet = jspreadsheetTable(instance);
+                spreadsheet.expandWidthForFormulaWhenFocus(spreadsheet, x, y);
+            },
         };
 
         return {
@@ -1322,8 +1370,7 @@ const getSpreadSheetFromToolsBarElement = (element) => {
     const processSectionElement = element.closest(`[id^="procSettingModalBody"]`);
     const speadSheetTableElement = processSectionElement.querySelector(`[id^="processColumnsTable"]`);
 
-    const spreadsheet = spreadsheetProcConfig(speadSheetTableElement);
-    return spreadsheet;
+    return spreadsheetProcConfig(speadSheetTableElement);
 };
 
 const sortColumnGraphConfig = (containerSelector = 'table') => {
@@ -1364,6 +1411,6 @@ const sortColumnGraphConfig = (containerSelector = 'table') => {
 
 const getSampleDataDisplayModeElement = (element) => {
     const processSectionElement = element.closest(`[id^="procSettingModalBody"]`);
-    const sampleDataDisplayModeElement = processSectionElement.querySelector(`[name="sampleDataDisplayMode"]:checked`);
+    const sampleDataDisplayModeElement = processSectionElement.querySelector(`[name^="sampleDataDisplayMode"]:checked`);
     return $(sampleDataDisplayModeElement);
 };

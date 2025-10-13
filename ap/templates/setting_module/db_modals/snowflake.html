@@ -1,0 +1,128 @@
+<!-- SNOWFLAKE WORKSHOP -->
+<div
+    class="modal fade db-modal"
+    id="modal-db-snowflake"
+    tabindex="-1"
+    role="dialog"
+    data-backdrop="static"
+    data-keyboard="false"
+>
+    <div class="modal-dialog" role="document" style="max-width:850px">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="col-md">
+                    <h4 class="modal-title">{{ _("Config") }}: {{ _("Snowflake") }}</h4>
+                </div>
+                {{ macros.polling_frequency_option('SNOWFLAKE', polling_frequency, is_authorized, [0, 60, 1440]) }}
+                <button
+                    type="button"
+                    class="btn btn-outline-secondary ml-2"
+                    data-toggle="modal"
+                    data-target="#advancedDSModal"
+                >
+                    Advanced
+                </button>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body h-100" name="modal-body-input">
+                {{ macros.alert_message("alert-snowflake-validation") }}
+                <div class="d-flex align-items-end">
+                    <form id="snowflakeCfgForm" class="mr-2 mb-2 flex-grow-1">
+                        {{ macros.input_row("snowflake_dbsourcename", _("Data Source Name"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                        {{ macros.input_row("snowflake_comment", _("Comment"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                        {{ macros.input_row("snowflake_pull_from", _("Import From (UTC)"), label_block_cnt=4, input_block_cnt=8, input_class='pl-0', id="snowflake_pull_from", placeholder="YYYY-MM-DD") }}
+                        <div class="d-flex flex-row justify-content-end">
+                            <div class="flex-grow-1">
+                                {{ macros.input_row("snowflake_host", _("Host name") + " (" + _("IP Address") + ")", label_block_cnt=7, input_block_cnt=5, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_dbname", _("Database Name"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                                {{ macros.input_row("snowflake_username", _("User name"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                                {{ macros.input_row("snowflake_role", _("RoleLabel"), label_block_cnt=7, input_block_cnt=5,label_class='p-0') }}
+                            </div>
+                            <div class="flex-grow-1">
+                                {{ macros.input_row("snowflake_port", _("Port number"), value='443', label_block_cnt=5, input_block_cnt=7, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_schema", _("Schema"), value='public', label_block_cnt=5, input_block_cnt=7, label_class='p-0') }}
+                                {{ macros.input_row("snowflake_warehouse", _("WarehouseLabel"), label_block_cnt=5, input_block_cnt=7,label_class='p-0') }}
+                            </div>
+                            {{ macros.input_hidden("snowflake_id", "", "snowflake_id") }}
+                        </div>
+                        <div class="form-group row">
+                            <label class="col-sm-4 col-form-label label-right"
+                                ><h5>{{ _("SnowflakeAuthTypeLabel") }}</h5></label
+                            >
+                            <div class="col-sm-8 pl-0">
+                                <div class="custom-control custom-radio custom-control-inline">
+                                    <input
+                                        type="radio"
+                                        class="custom-control-input"
+                                        id="snowflakeAuthAccessToken"
+                                        name="snowflakeAuthType"
+                                        value="access_token"
+                                        onchange="switchAuthTypeDisplay(this)"
+                                        data-observer
+                                    />
+                                    <label class="custom-control-label" for="snowflakeAuthAccessToken"
+                                        >{{ _("AccessTokenRadioLabel") }}</label
+                                    >
+                                    <a
+                                        class="ml-2"
+                                        target="_blank"
+                                        href="https://docs.snowflake.com/en/user-guide/programmatic-access-tokens#generating-a-programmatic-access-token"
+                                        ><i class="fa fa-external-link-alt"></i
+                                    ></a>
+                                </div>
+                                <div class="custom-control custom-radio custom-control-inline">
+                                    <input
+                                        type="radio"
+                                        class="custom-control-input"
+                                        id="snowflakeAuthKeypair"
+                                        name="snowflakeAuthType"
+                                        value="keypair"
+                                        onchange="switchAuthTypeDisplay(this)"
+                                        data-observer
+                                    />
+                                    <label class="custom-control-label" for="snowflakeAuthKeypair"
+                                        >{{ _("KeypairRadioLabel") }}</label
+                                    >
+                                    <a
+                                        class="ml-2"
+                                        target="_blank"
+                                        href="https://docs.snowflake.com/en/user-guide/key-pair-auth#configuring-key-pair-authentication"
+                                        ><i class="fa fa-external-link-alt"></i
+                                    ></a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex">
+                            <div id="inputAreaAccessTokenType" class="flex-grow-1" style="display: block;">
+                                {{ macros.input_row("snowflake_access_token", _("SnowflakeAccessTokenLabel"), type='password', label_block_cnt=4, input_block_cnt=8, margin_bottom_class='mb-0', input_class='pl-0') }}
+                            </div>
+                            <div id="inputAreaKeypairType" class="flex-column flex-grow-1" style="display: none;">
+                                {{ macros.input_row("snowflake_private_key_file", _("SnowflakePrivateKeyFilePathLabel"), value='', label_block_cnt=4, input_block_cnt=8, input_class='pl-0') }}
+                                {{ macros.input_row("snowflake_private_key_file_pwd", _("SnowflakePrivateKeyFilePwdLabel"), type='password', label_block_cnt=4, input_block_cnt=8, margin_bottom_class='mb-0', input_class='pl-0') }}
+                            </div>
+                        </div>
+                        {{ macros.input_hidden("snowflake_use_os_timezone", "", "snowflake_use_os_timezone") }}
+                    </form>
+                </div>
+            </div>
+            <div class="modal-footer">
+                {{ macros.check_db_connection_message('snowflake', '#modal-db-snowflake div[name="modal-body-input"]', 'btn-test-db-conn-snowflake', 'msg-test-db-conn-snowflake') }}
+                <button
+                    id=""
+                    type="button"
+                    onclick="saveDBInfo()"
+                    class="btn btn-primary saveDBInfoBtn"
+                    data-item-id=""
+                    data-submit-btn="true"
+                >
+                    {{ _("OK") }}
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="handleCloseDSConfigModal(this)">
+                    {{ _("Cancel") }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -30,7 +30,6 @@ class MainDiskUsage(DiskUsageInterface):
         return shutil.disk_usage(path=path)
 
 
-@CustomCache.memoize(duration=60)
 def get_disk_usage_percent(path=None):
     """
     Gets disk usage information.
@@ -64,7 +63,7 @@ def get_disk_usage_percent(path=None):
 
 
 @log_execution_time()
-def get_disk_capacity():
+def get_disk_capacity() -> 'DiskCapacityException':
     """
     Get information of disk capacity on Bridge Station & Postgres DB
 

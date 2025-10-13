@@ -325,7 +325,7 @@ def simple_convert_to_v2_vertical(
     # find duplicate quality columns, compare with index of df
     duplicated_cols = list(set(df.columns).intersection(unique_cols))
     filter_cols = unique_cols + list(normalized_vertical_cols)
-    if len(duplicated_cols) or len(filter_cols):
+    if duplicated_cols or len(filter_cols):
         df_columns, is_duplicated, _ = add_suffix_if_duplicated(filter_cols)
         # rename columns if there is duplicated measure item name
         if True in is_duplicated:
@@ -504,7 +504,7 @@ def get_v2_datasource_type_from_df(df: DataFrame) -> Union[tuple[DBType, bool, b
         if datasource_type == DBType.V2_MULTI:
             _df = rename_quality_group(df, datasource_type)
             columns = {col.strip() for col in _df.columns}
-        columns = {V2_SAME_COL_DIC[col] if col in V2_SAME_COL_DIC else col for col in columns}
+        columns = {V2_SAME_COL_DIC.get(col, col) for col in columns}
         must_exist_columns = set(WELL_KNOWN_COLUMNS[datasource_type.name].keys())
         abnormal_must_exist_columns = set(ABNORMAL_WELL_KNOWN_COLUMNS[datasource_type.name].keys())
         en_must_exist_columns = (

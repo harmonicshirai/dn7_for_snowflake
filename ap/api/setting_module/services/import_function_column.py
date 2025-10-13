@@ -296,7 +296,7 @@ def add_new_columns_to_transaction_table(process: CfgProcess, meta_session: scop
     :param scoped_session meta_session: a db session
     :return: void
     """
-    with DbProxy(gen_data_source_of_universal_db(process.id), True, immediate_isolation_level=True) as db_instance:
+    with DbProxy(gen_data_source_of_universal_db(process.id), True) as db_instance:
         trans_data = TransactionData(process, meta_session=meta_session)
         if trans_data.table_name not in db_instance.list_tables():
             # If transaction is not created yet, do nothing
@@ -329,6 +329,7 @@ def add_required_jobs_after_update_transaction_table(
         process_name=import_params.process_name,
         data_source_id=import_params.data_source_id,
         data_source_type=import_params.data_source_type,
+        interval_sec=import_params.polling_frequency,
         run_now=True,
         is_user_request=True,
     )
@@ -356,7 +357,6 @@ def update_transaction_table(
     :rtype: Generator[JobInfo]
     """
     job_info = JobInfo()
-    job_info.has_record = True  # trick to execute after_success_func after done generate
     job_info.percent = 0
     yield job_info
 
@@ -364,7 +364,6 @@ def update_transaction_table(
         DbProxy(
             gen_data_source_of_universal_db(process.id),
             True,
-            immediate_isolation_level=True,
         ) as db_instance,
         job_info.interruptible() as job_info,
     ):
@@ -380,7 +379,7 @@ def update_transaction_table(
         redundant_table_columns = [
             table_column for table_column in exist_table_columns if table_column not in table_columns_from_cfg
         ]
-        if len(redundant_table_columns):
+        if redundant_table_columns:
             # Must remove index first before remove column to avoid error
             for column in redundant_table_columns:
                 indexes = trans_data.get_indexes_by_column_name(db_instance, column)
@@ -459,9 +458,8 @@ def update_transaction_table_job(
         JobType.UPDATE_TRANSACTION_TABLE,
         process_id=process.id,
         is_check_disk=False,
-        after_success_func=add_required_jobs_after_update_transaction_table,
-        after_success_func_kwargs={'process': process},
     )
+    add_required_jobs_after_update_transaction_table(process=process)
 
 
 def reschedule_update_transaction_table():
@@ -471,7 +469,7 @@ def reschedule_update_transaction_table():
     **NOTE**: Only do this function in start app time
     :return: void
     """
-    process_ids: list[int] = [proc.id for proc in CfgProcess.get_all_ids()]
+    process_ids: list[int] = CfgProcess.get_all_ids()
     jobs: list[Job] = scheduler.get_jobs()
     now = datetime.now(utc)
     for process_id in process_ids:

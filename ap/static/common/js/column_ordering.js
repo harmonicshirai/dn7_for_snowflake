@@ -5,7 +5,7 @@ let showOrderModalGraphAreaClick = 0;
 let removeColIds = [];
 let latestSortColIdsJumpPage = [];
 const isScpOrHmpPage =
-    getCurrentPage() === PAGE_NAME.scp || getCurrentPage() === PAGE_NAME.hmp || getCurrentPage() === PAGE_NAME.tv;
+    getCurrentPage() === PAGE_NAME.scp || getCurrentPage() === PAGE_NAME.hmp || getCurrentPage() === PAGE_NAME.wfp;
 
 const orderingEls = {
     endColOrderTable: '#endColOrderTable',
@@ -229,7 +229,7 @@ const initShowGraphCommon = () => {
         if (!sortedColIds.length) {
             sortedColIds = getSensorOrderFromGUI(latestSortColIds);
         }
-        if (!useEMD && !isSaveColumnOrdering()) {
+        if (!useEMD && !isSaveColumnOrdering() && !isScpOrHmpPage) {
             latestSortColIds = [...sortedColIds];
         } else {
             // filer checked sensor with latest records
