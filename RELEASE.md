@@ -1,5 +1,56 @@
 # Releases
 
+## 4.8.1
+
+This version includes new features 
+
+Core changes
+
+- Added Snowflake to data source
+  - We support two types of authentication: Access token and Key-pair
+  - Please be aware that fees will be incurred when downloading data from Snowflake
+  - The longer polling frequency (e.g. 1day), the lower the cost  
+  <img src="https://github.com/user-attachments/assets/cd809787-73c2-4b96-ae0e-08288e9d3bbc" alt="481_Snowflake" width="600">
+
+New features and improvements
+
+- (Common)
+  - Register by file: Added a searchbox
+    - Detected characters are highlighted  
+    <img src="https://github.com/user-attachments/assets/37054598-07cc-44e6-b6f4-30397793ce6d" alt="481_Searchbox" width="600">
+  - When a process is selected in Show graph pages, it will also be selected in Filter processes if any Filter configuration exist
+  - When only minimum or maximum `Control Line` is configured but not both, Process Capability Index (CP) will still be calculated
+  - Now AP+DN7 cleans up inappropriate app.sqlite3 (configuration database) on activation
+- (Config)
+  - Data Source Config: Added dropdown list to configure polling frequency for each data source  
+  <img src="https://github.com/user-attachments/assets/4df4bc4b-bcc0-40df-9bf1-fcaf743d277c" alt="481_PollingFrequency" width="600">
+  - Process Config: Columns with `id` their names are automatically recognized as Main:Serial columns by default if no columns with `Serial` in their names exist
+  - Process Config: A warning message is now shown when the user changes Judge variables in Process Configuration
+  - Display Config: `Valid From` is now optional
+  - A loading animation is now shown when the Process Config Register by File is rendering
+  - A loading animation is now shown when the list of tables are retrieved from Database sources
+  - Added option `disable_config_from_external` to `startup.ini`
+    - Register/delete buttons are disabled when accessing the application from other clients
+    - You can prevent the configurations from being accidentally changed or removed  
+    <img src="https://github.com/user-attachments/assets/38bea7a8-057d-4203-98dc-3a4bd3dd9d90" alt="481_Startup" width="600">  
+    <img src="https://github.com/user-attachments/assets/4677a858-1538-4a7e-9f3f-e23dfbc65bb8" alt="481_DisableConfig" width="600">
+
+Bug fixes
+
+- (Common)
+  - Fixed an issue where AP+DN7 fails to avtivate when white spaces exist in the application path
+  - Fixed an issue where jobs are delayed if the application has too many jobs
+  - Fixed an issue where copy paste in visualization page generate empty rows
+- (Config)
+  - Fixed an issue where registering data link can cause configured links to disappear
+  - Fixed an issue where web cache causes registered processes to disappear
+  - Fixed an issue where application cannot import csv folder correctly using python etl script
+  - Now Register by File and Process Config is consistent in terms of data type estimation
+- (CHM)
+  - Fixed an issue where copying users settings from CHM to AgP causes error due to different datetime format
+
+
+
 ## 4.8.0
 
 New features
