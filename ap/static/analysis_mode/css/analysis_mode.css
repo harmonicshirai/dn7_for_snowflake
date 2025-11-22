@@ -1,0 +1,47 @@
+.analysis-result-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding-bottom: 50px;
+}
+
+.analysis-graph-card {
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 15px;
+    min-height: 400px;
+}
+
+.analysis-graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #555;
+    padding-bottom: 5px;
+}
+
+.analysis-graph-title {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #eee;
+}
+
+.analysis-graph-desc {
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.analysis-step-number {
+    background: #007bff;
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+    font-size: 0.8em;
+}

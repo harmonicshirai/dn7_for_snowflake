@@ -255,6 +255,7 @@ def create_app(object_name=None, is_main=False):
     from .tile_interface import create_module as tile_interface_create_module
     from .trace_data import create_module as trace_data_create_module
     from .waveform_plot import create_module as waveform_plot_create_module
+    from .analysis_mode import create_module as analysis_mode_create_module
 
     app = Flask(__name__)
     app.config.from_object(object_name)
@@ -334,6 +335,7 @@ def create_app(object_name=None, is_main=False):
     tile_interface_create_module(app)
     agp_create_module(app)
     waveform_plot_create_module(app)
+    analysis_mode_create_module(app)
 
     app.add_url_rule('/', endpoint='tile_interface.tile_interface')
 

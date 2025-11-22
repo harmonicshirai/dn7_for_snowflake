@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block header %}
+    {{ macros.page_title(key='AnM', title=_('Data Analysis Mode'), hint=_('Data Analysis Mode Description'), hasAction=true) }}
+{% endblock %}
+
+{% block midbody %}
+    <div class="card monitor-icons">
+        <form id="traceDataForm" class="GUIForm">
+            <!-- Data Finder Card -->
+            {{ macros.data_finder_card() }}
+
+            <!-- Analysis Mode Selection -->
+            <div class="card-body table-bordered graph-navi">
+                <div class="row">
+                    <div class="col-xl-2 col-3">
+                        <div class="d-flex justify-content-between">
+                            {{ macros.label(_("Analysis Mode")) }}
+                        </div>
+                    </div>
+                    <div class="col-xl-10 col-9">
+                        <div class="d-flex align-items-center">
+                            <div class="custom-control custom-radio mr-4">
+                                <input type="radio" id="modeFactorAnalysis" name="analysisMode" class="custom-control-input" value="factor_analysis" checked>
+                                <label class="custom-control-label" for="modeFactorAnalysis">{{ _('Factor Analysis Pattern') }}</label>
+                            </div>
+                            <div class="custom-control custom-radio mr-4">
+                                <input type="radio" id="modeContinuousMonitoring" name="analysisMode" class="custom-control-input" value="continuous_monitoring">
+                                <label class="custom-control-label" for="modeContinuousMonitoring">{{ _('Continuous Monitoring Pattern') }}</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Target Variable Selection -->
+            <div class="card-body table-bordered graph-navi">
+                <div class="row">
+                    <div class="col-xl-2 col-3">
+                        <div class="d-flex justify-content-between">
+                            {{ macros.label(_("Objective Variable")) }}
+                        </div>
+                    </div>
+                    <div class="col-xl-10 col-9">
+                        <select id="objectiveVar" name="objectiveVar" class="form-control" style="max-width: 300px;">
+                            <option value="">{{ _('Select Variable') }}</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+             <!-- Date range -->
+            <div class="card-body table-bordered graph-navi">
+                <div class="row">
+                    <div class="col-xl-2 col-3">
+                        <div class="d-flex justify-content-between">
+                            {{ macros.label(_("Target period")) }}
+                            {{ macros.paste_btn() }}
+                        </div>
+                    </div>
+                    <div class="col-xl-10 col-9">
+                        <div class="row">
+                            {{ macros.multiple_target_period() }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex align-items-center justify-content-center show-graph-div mt-3 mb-3">
+                <button
+                    id="analysis-btn"
+                    type="button"
+                    onClick="runAnalysis();"
+                    class="btn btn-primary show-graph ml-3"
+                >
+                    <i class="fas fa-chart-bar"></i> {{ _('Generate Graphs') }}
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Result Container -->
+    <div id="analysisResultContainer" class="analysis-result-container mt-4">
+        <!-- Graphs will be injected here -->
+    </div>
+
+    <div class="loading"></div>
+{% endblock %}
+
+{% block js %}
+    <script>
+        const procJsons = {{ list_procs | safe }};
+        const hasGraphCfgsFilterDetails= {{ graph_filter_detail_ids | safe }};
+        const procConfigs = {};
+        for (let procJson of procJsons){
+            const cfgProcess = new CfgProcess(procJson);
+            procConfigs[cfgProcess.id] = cfgProcess;
+        }
+    </script>
+    {% assets "js_analysis_mode" %}
+        <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+    {% endassets %}
+    {% assets "css_analysis_mode" %}
+        <link rel="stylesheet" href="{{ ASSET_URL }}" />
+    {% endassets %}
+{% endblock %}
