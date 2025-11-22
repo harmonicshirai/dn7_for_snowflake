@@ -549,7 +549,6 @@ class CfgDataSource(db.Model):
 
     def software_workshop_def(self):
         if self.type == DBType.SNOWFLAKE_SOFTWARE_WORKSHOP.name:
-            # FIXME: handle normal snowflake
             from ap.api.setting_module.services.software_workshop_etl_services import (
                 SNOWFLAKE_SOFTWARE_WORKSHOP_DEF,
             )

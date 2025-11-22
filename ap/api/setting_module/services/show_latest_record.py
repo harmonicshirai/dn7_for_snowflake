@@ -491,6 +491,10 @@ def get_info_from_db_software_workshop(
     data_source: CfgDataSource = CfgDataSource.query.get(data_source_id)
     software_workshop_def = data_source.software_workshop_def()
 
+    if not software_workshop_def:
+        # Fallback for generic Snowflake or other DBs incorrectly routed here
+        return get_info_from_db_normal(data_source, child_equip_id, sql_limit)
+
     with ReadOnlyDbProxy(data_source) as db_instance:
         if not db_instance or not child_equip_id:
             return [], pd.DataFrame(), {}
