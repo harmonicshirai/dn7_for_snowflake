@@ -238,5 +238,9 @@
             "common/js/cat_facet_label_filter_modal.js"
         ],
         "css": ["analyze/css/graphical_lasso.css"]
+    },
+    "analysis_mode": {
+        "js": ["analysis_mode/js/analysis_mode.js"],
+        "css": ["analysis_mode/css/analysis_mode.css"]
     }
 }
