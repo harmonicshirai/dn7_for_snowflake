@@ -1,1 +1,15 @@
 .venv
+.pyc
+__pycache__/
+instance
+
+# --- local runtime data / cache ---
+data/
+instance/
+.multi_process_communication.addr
+
+# SQLite cache (念のため)
+*.db
+*.db-shm
+*.db-wal
+*.val
